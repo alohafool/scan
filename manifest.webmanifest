@@ -1,0 +1,15 @@
+{
+  "name": "PC MAP 盤點掃描",
+  "short_name": "盤點掃描",
+  "description": "手機掃資產貼紙上的方形碼，放進櫃位，匯出 JSON 給 PC MAP。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef1f4",
+  "theme_color": "#1c2733",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PROTOTYPE AR 定位實測</title>
+<!--
+  PROTOTYPE，驗證完就刪，不是正式功能。
+  要回答的問題：iPhone 瀏覽器用 8th Wall 的世界追蹤（SLAM），能不能在實驗室裡知道手機在哪一側、哪一列、哪一層？
+  做法：先在幾個已知位置按「標記」校正，之後每個位置由手機座標推算格子，和實際格子比對，算命中率與飄移。
+  桌機沒有相機：網址加 ?sim=1 用假座標驗證推算邏輯。
+  資料只在記憶體，重新整理就沒了；測完按「匯出紀錄」。
+-->
+<script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
+<style>
+:root { --bg:#161b22; --panel:#1f2630; --fg:#e6ebf0; --muted:#9aa7b4; --line:#3a4552; --accent:#f0804a; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --mono:Consolas,Menlo,monospace; color-scheme: dark }
+* { box-sizing: border-box } [hidden] { display: none !important }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 -apple-system, "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif }
+body { padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); display: grid; gap: 8px }
+.tag { background: var(--bad); color: #000; font-weight: 700; padding: 1px 6px; border-radius: 4px; font-size: .75rem }
+h1 { font-size: 1rem; margin: 6px 0 0; display: flex; gap: 8px; align-items: center }
+.camwrap { position: relative; background: #000; border-radius: 10px; overflow: hidden; height: 38vh; min-height: 220px }
+#cam { width: 100%; height: 100%; display: block }
+.hud { position: absolute; left: 6px; top: 6px; right: 6px; font: 11px/1.35 var(--mono); color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; white-space: pre-wrap; pointer-events: none }
+.big { position: absolute; left: 6px; right: 6px; bottom: 6px; background: rgba(0,0,0,.6); border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 1.05rem; text-align: center }
+.startwrap { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.6) }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 8px }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center }
+button { font: inherit; font-weight: 600; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--line); background: #2a323c; color: var(--fg); min-height: 42px }
+button.primary { background: var(--accent); border-color: var(--accent); color: #000 } button:disabled { opacity: .4 }
+.muted { color: var(--muted); font-size: .82rem } .mono { font-family: var(--mono) }
+.ask { font-weight: 700; font-size: 1.05rem; color: var(--warn) }
+.stats { font: 12px/1.5 var(--mono); white-space: pre-wrap }
+ol { margin: 0; padding-left: 20px } li.done { color: var(--ok) } li.cur { color: var(--warn); font-weight: 700 }
+#map { width: 100%; height: 190px; background: #0d1117; border-radius: 8px }
+ul.log { list-style: none; margin: 0; padding: 0; font: 11.5px/1.4 var(--mono); max-height: 150px; overflow: auto } ul.log li { padding: 2px 0; border-bottom: 1px dashed var(--line) }
+.hit { color: var(--ok) } .miss { color: var(--bad) }
+input[type=number] { width: 70px; font: inherit; padding: 6px; background: #0d1117; color: var(--fg); border: 1px solid var(--line); border-radius: 6px }
+select { font: inherit; padding: 6px; background: #0d1117; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; max-width: 100% }
+textarea { width: 100%; min-height: 150px; font: 11px var(--mono); background: #0d1117; color: var(--fg); border: 1px solid var(--line); border-radius: 8px }
+dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; width: min(94vw, 520px) } dialog::backdrop { background: rgba(0,0,0,.6) }
+a { color: var(--accent) }
+</style>
+</head>
+<body>
+<h1><span class="tag">PROTOTYPE</span> AR 定位實測 <span class="muted" id="mode"></span></h1>
+
+<div class="camwrap">
+  <canvas id="cam"></canvas>
+  <div class="hud" id="hud">尚未啟動</div>
+  <div class="big" id="big" hidden></div>
+  <div class="startwrap" id="startwrap"><button class="primary" id="btnStart">開始（會要相機與動作感測權限）</button></div>
+</div>
+
+<div class="panel" id="pCal">
+  <b>1. 校正：手機拿在掃貼紙的距離，對準下面的位置，按「標記」</b>
+  <ol id="calSteps"></ol>
+  <div class="row"><button class="primary" id="btnMark" disabled>標記這個位置</button><button id="btnRecal">重新校正</button></div>
+  <div class="muted">每側只標頭尾兩列，中間的列用等分推算；尺度誤差會被抵消，所以不用量尺寸。</div>
+</div>
+
+<div class="panel" id="pTest" hidden>
+  <b>2. 測試</b>
+  <div class="ask" id="ask"></div>
+  <div class="row">
+    <button class="primary" id="btnRec">到了，記錄</button><button id="btnSkip">跳過</button><button id="btnHome">回到起點檢查飄移</button>
+  </div>
+  <div class="muted">照提示走到那一格，像掃貼紙一樣拿好再按。畫面下方的大字是手機目前推算的格子。相機若讀到貼紙的方形碼，也會自動記一筆。</div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div class="panel"><canvas id="map" width="700" height="380"></canvas><ul class="log" id="log"></ul>
+  <div class="row"><button id="btnExport">匯出紀錄</button></div></div>
+
+<div class="panel" id="pSim" hidden>
+  <b>模擬（桌機驗證用）</b>
+  <div class="row">雜訊 σ <input type="number" id="simSigma" value="10" min="0"> 公分　飄移 <input type="number" id="simDrift" value="1" min="0" step="0.5"> %／公尺　列寬 <input type="number" id="simPitch" value="100" min="20"> 公分</div>
+  <div class="row"><select id="simCell"></select><button id="simGo">移到這格</button><button class="primary" id="simAuto">自動校正＋跑完全部</button></div>
+  <div class="stats" id="simOut"></div>
+</div>
+
+<div class="muted">AR 追蹤使用 8th Wall Engine，© Niantic Spatial, Inc.，依 <a href="https://github.com/8thwall/engine/blob/main/LICENSE" target="_blank" rel="noopener">XR Engine License Agreement</a> 授權，軟體以現狀提供，不含任何保固。</div>
+
+<dialog id="dlg"><b>匯出紀錄</b><p class="muted">複製或分享這段 JSON 給 Claude 分析。</p><textarea id="exp" readonly></textarea>
+  <div class="row" style="margin-top:8px"><button class="primary" id="btnCopy">複製</button><button id="btnShare">分享／存檔</button><button id="btnClose">關閉</button></div></dialog>
+
+<script type="module">
+import { prepareZXingModule, readBarcodes } from './vendor/zxing-reader.js';
+
+const $ = id => document.getElementById(id);
+const Q = new URLSearchParams(location.search);
+const SIM = Q.has('sim');
+const SCALE = Q.get('scale') === 'absolute' ? 'absolute' : 'responsive';
+$('mode').textContent = SIM ? '模擬模式' : `scale=${SCALE}`;
+
+// ---------------------------------------------------------------- 格局（竹南；和 PC MAP 的 grid 同欄位）
+const G = { sides: [{ label: '左側', racks: 2 }, { label: '右側', racks: 2 }], shelves: 3, per_shelf: 4, shelf_kinds: ['monitor', 'pc', 'pc'] };
+const PC_SHELVES = [...Array(G.shelves).keys()].filter(s => G.shelf_kinds[s] === 'pc');
+const nCols = s => G.sides[s].racks * G.per_shelf;
+const rackOff = s => G.sides.slice(0, s).reduce((a, x) => a + x.racks, 0);
+const cellText = c => `${G.sides[c.side].label}櫃 ${Math.floor(c.idx / G.per_shelf) + 1} · 第 ${c.idx % G.per_shelf + 1} 列 · 第 ${c.shelf + 1} 層`;
+const cellOut = c => ({ side: c.side, idx: c.idx, rack: rackOff(c.side) + Math.floor(c.idx / G.per_shelf), col: c.idx % G.per_shelf, shelf: c.shelf });
+
+// 校正步驟：第 0 側頭（第一個 pc 層）、其餘 pc 層的高度、第 0 側尾；之後各側交替尾／頭，少走路
+function buildSteps() {
+  const st = [{ side: 0, end: 'first', shelf: PC_SHELVES[0] }];
+  for (const sh of PC_SHELVES.slice(1)) st.push({ side: 0, end: 'first', shelf: sh, heightOnly: true });
+  st.push({ side: 0, end: 'last', shelf: PC_SHELVES[0] });
+  for (let s = 1; s < G.sides.length; s++) { const order = s % 2 ? ['last', 'first'] : ['first', 'last']; for (const end of order) st.push({ side: s, end, shelf: PC_SHELVES[0] }); }
+  return st.map(x => ({ ...x, cell: { side: x.side, idx: x.end === 'first' ? 0 : nCols(x.side) - 1, shelf: x.shelf } }));
+}
+const STEPS = buildSteps();
+
+// ---------------------------------------------------------------- 狀態（全部在記憶體）
+const T0 = Date.now();
+const S = { pose: null, status: '-', reason: '-', fps: 0, frame: null, cal: { ends: {}, heights: {} }, marks: [], step: 0, samples: [], trace: [], events: [], guide: [], gi: 0, decodes: 0, decodeTries: 0 };
+const now = () => Math.round((Date.now() - T0) / 100) / 10;
+const fwd = q => { const [w, x, y, z] = q; return [-(2 * (x * z + w * y)), -(2 * (y * z - w * x)), -(1 - 2 * (x * x + y * y))]; };
+const r3 = v => v.map(n => Math.round(n * 1000) / 1000);
+const calibrated = () => S.step >= STEPS.length;
+
+// ---------------------------------------------------------------- 由座標推算格子
+function predict(p, f) {
+  const cands = [];
+  for (let s = 0; s < G.sides.length; s++) {
+    const e = S.cal.ends[s]; if (!e?.first || !e?.last) continue;
+    const A = e.first.p, B = e.last.p, dx = B[0] - A[0], dz = B[2] - A[2], L = Math.hypot(dx, dz) || 1e-9, n = nCols(s);
+    const t = ((p[0] - A[0]) * dx + (p[2] - A[2]) * dz) / (L * L);
+    const perp = Math.abs((p[0] - A[0]) * dz - (p[2] - A[2]) * dx) / L;
+    const pitch = n > 1 ? L / (n - 1) : L, u = t * (n - 1), idx = Math.max(0, Math.min(n - 1, Math.round(u)));
+    const nf = [e.first.f[0] + e.last.f[0], e.first.f[2] + e.last.f[2]], nl = Math.hypot(...nf) || 1, fl = Math.hypot(f[0], f[2]);
+    const face = fl > 0.5 ? (f[0] * nf[0] + f[2] * nf[1]) / (fl * nl) : null;   // 手機朝向和這一側校正時的朝向有多一致
+    cands.push({ side: s, idx, u, perp, pitch, face });
+  }
+  if (!cands.length) return null;
+  const faces = cands.map(c => c.face);
+  const byFace = faces.every(v => v !== null) && Math.max(...faces) - Math.min(...faces) > 0.5;
+  const c = cands.reduce((a, b) => (byFace ? b.face > a.face : b.perp < a.perp) ? b : a);
+  let shelf = PC_SHELVES[0], dy = 0, best = Infinity;
+  for (const sh of PC_SHELVES) { const h = S.cal.heights[sh]; if (h == null) continue; const d = Math.abs(p[1] - h); if (d < best) { best = d; shelf = sh; dy = p[1] - h; } }
+  return { side: c.side, idx: c.idx, shelf, u: c.u, lateral: c.u - c.idx, perpCols: c.perp / c.pitch, dyCols: dy / c.pitch, pitch: c.pitch, sideBy: byFace ? 'facing' : 'nearest' };
+}
+
+// ---------------------------------------------------------------- 校正
+function renderSteps() {
+  $('calSteps').innerHTML = '';
+  STEPS.forEach((st, i) => { const li = document.createElement('li'); li.textContent = cellText(st.cell) + ' 正中央' + (st.heightOnly ? '（只記高度）' : ''); li.className = i < S.step ? 'done' : i === S.step ? 'cur' : ''; $('calSteps').appendChild(li); });
+  $('btnMark').disabled = !S.pose || calibrated();
+  $('pTest').hidden = !calibrated();
+  if (calibrated() && !S.guide.length) buildGuide();
+  renderAsk();
+}
+function mark() {
+  if (!S.pose || calibrated()) return;
+  const st = STEPS[S.step], m = { step: S.step, cell: cellOut(st.cell), t: now(), p: r3(S.pose.p), q: r3(S.pose.q), f: r3(fwd(S.pose.q)), status: S.status };
+  S.marks.push(m);
+  if (!st.heightOnly) (S.cal.ends[st.side] = S.cal.ends[st.side] || {})[st.end] = { p: S.pose.p.slice(), f: fwd(S.pose.q) };
+  if (st.side === 0 && st.end === 'first') S.cal.heights[st.shelf] = S.pose.p[1];
+  S.step++; log(`標記 ${cellText(st.cell)}`); renderSteps();
+}
+$('btnMark').addEventListener('click', mark);
+$('btnRecal').addEventListener('click', () => { S.cal = { ends: {}, heights: {} }; S.step = 0; S.guide = []; S.gi = 0; S.events.push({ t: now(), ev: 'recalibrate' }); log('重新校正'); renderSteps(); });
+
+// ---------------------------------------------------------------- 引導測試
+function buildGuide() {
+  S.guide = []; S.gi = 0;
+  for (let s = 0; s < G.sides.length; s++) PC_SHELVES.forEach((sh, k) => { const ids = [...Array(nCols(s)).keys()]; if (k % 2) ids.reverse(); ids.forEach(idx => S.guide.push({ side: s, idx, shelf: sh })); });
+}
+function renderAsk() {
+  if (!calibrated()) return;
+  $('ask').textContent = S.gi < S.guide.length ? `第 ${S.gi + 1}/${S.guide.length} 格：請對準 ${cellText(S.guide[S.gi])}` : '全部走完了。可以匯出紀錄，或按「跳過」再走一輪。';
+  const g = S.samples.filter(x => x.type === 'guided'), n = g.length, c = k => g.filter(x => x.hit[k]).length;
+  const home = S.samples.filter(x => x.type === 'home').map(x => x.driftCols.toFixed(2)).join('、');
+  $('stats').textContent = n ? `引導 ${n} 點　全對 ${c('all')}/${n}　側 ${c('side')}/${n}　列 ${c('col')}/${n}　層 ${c('shelf')}/${n}\n列方向平均偏移 ${(g.reduce((a, x) => a + Math.abs(x.err.u), 0) / n).toFixed(2)} 列寬（超過 0.5 就會判錯列）\n回起點飄移：${home || '還沒測'} 列寬　解碼 ${S.decodes} 次` : `解碼 ${S.decodes} 次`;
+}
+function sample(type, extra) {
+  const p = S.pose.p.slice(), q = S.pose.q.slice(), pr = predict(p, fwd(q));
+  const s = { type, t: now(), p: r3(p), q: r3(q), status: S.status, pred: pr ? { ...cellOut(pr), u: +pr.u.toFixed(3), lateral: +pr.lateral.toFixed(3), perpCols: +pr.perpCols.toFixed(3), dyCols: +pr.dyCols.toFixed(3), sideBy: pr.sideBy } : null, ...extra };
+  S.samples.push(s); return { s, pr };
+}
+$('btnRec').addEventListener('click', () => {
+  if (!S.pose || S.gi >= S.guide.length) return;
+  const asked = S.guide[S.gi], { s, pr } = sample('guided', { asked: cellOut(asked) });
+  s.hit = { side: pr.side === asked.side, col: pr.side === asked.side && pr.idx === asked.idx, shelf: pr.shelf === asked.shelf }; s.hit.all = s.hit.col && s.hit.shelf;
+  s.err = { u: pr.side === asked.side ? +(pr.u - asked.idx).toFixed(3) : 99 };
+  log(`${s.hit.all ? '✓' : '✗'} 要 ${cellText(asked)}　推算 ${cellText(pr)}　偏 ${s.err.u} 列`, s.hit.all ? 'hit' : 'miss');
+  S.gi++; renderAsk();
+});
+$('btnSkip').addEventListener('click', () => { S.gi = S.gi < S.guide.length ? S.gi + 1 : 0; renderAsk(); });
+$('btnHome').addEventListener('click', () => {
+  if (!S.pose || !S.marks.length) return; const m = S.marks[0], e = S.cal.ends[0];
+  const d = Math.hypot(S.pose.p[0] - m.p[0], S.pose.p[1] - m.p[1], S.pose.p[2] - m.p[2]);
+  const pitch = Math.hypot(e.last.p[0] - e.first.p[0], e.last.p[2] - e.first.p[2]) / Math.max(1, nCols(0) - 1);
+  const { s } = sample('home', { drift: +d.toFixed(3), driftCols: +(d / pitch).toFixed(3) });
+  log(`回起點：差 ${s.driftCols} 列寬${SCALE === 'absolute' ? `（約 ${Math.round(d * 100)} 公分）` : ''}`); renderAsk();
+});
+
+// ---------------------------------------------------------------- 畫面
+function log(msg, cls = '') { const li = document.createElement('li'); li.className = cls; li.textContent = `${now().toFixed(1)}s ${msg}`; $('log').prepend(li); }
+let lastTrace = 0, frames = 0, fpsT = performance.now();
+function setPose(p, q, status, reason) {
+  S.pose = { p, q }; frames++;
+  if (status !== S.status || reason !== S.reason) { S.status = status; S.reason = reason; S.events.push({ t: now(), ev: 'tracking', status, reason }); }
+  const t = performance.now();
+  if (t - fpsT > 1000) { S.fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t; }
+  if (t - lastTrace > 500 && S.trace.length < 6000) { lastTrace = t; S.trace.push([now(), ...r3(p)]); }
+  if ($('btnMark').disabled && !calibrated()) $('btnMark').disabled = false;
+}
+function draw() {
+  requestAnimationFrame(draw);
+  const P = S.pose;
+  $('hud').textContent = P ? `追蹤 ${S.status}/${S.reason}　${S.fps} fps\nx ${P.p[0].toFixed(2)}  y ${P.p[1].toFixed(2)}  z ${P.p[2].toFixed(2)}\n畫面 ${S.frame || '-'}　解碼 ${S.decodes}/${S.decodeTries}${S.lastCode ? '　' + S.lastCode : ''}` : $('hud').textContent;
+  const pr = P && calibrated() ? predict(P.p, fwd(P.q)) : null;
+  $('big').hidden = !pr; if (pr) $('big').textContent = `推算：${cellText(pr)}`;
+  drawMap(pr);
+}
+function drawMap(pr) {
+  const cv = $('map'), c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height);
+  const pts = S.marks.map(m => m.p).concat(S.trace.slice(-600).map(t => t.slice(1))); if (S.pose) pts.push(S.pose.p);
+  if (!pts.length) return;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); }
+  const span = Math.max(x1 - x0, z1 - z0, 0.5) * 1.25, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, k = Math.min(cv.width, cv.height) / span;
+  const X = x => cv.width / 2 + (x - cx) * k, Z = z => cv.height / 2 + (z - cz) * k;
+  c.strokeStyle = '#3a4552'; c.lineWidth = 1.5; c.beginPath(); S.trace.slice(-600).forEach((t, i) => i ? c.lineTo(X(t[1]), Z(t[3])) : c.moveTo(X(t[1]), Z(t[3]))); c.stroke();
+  c.font = '18px sans-serif';
+  for (let s = 0; s < G.sides.length; s++) { const e = S.cal.ends[s]; if (!e?.first) continue;
+    c.fillStyle = '#f0804a'; c.fillText(G.sides[s].label, X(e.first.p[0]) + 8, Z(e.first.p[2]) - 8);
+    if (!e.last) { c.fillRect(X(e.first.p[0]) - 5, Z(e.first.p[2]) - 5, 10, 10); continue; }
+    c.strokeStyle = '#f0804a'; c.lineWidth = 3; c.beginPath(); c.moveTo(X(e.first.p[0]), Z(e.first.p[2])); c.lineTo(X(e.last.p[0]), Z(e.last.p[2])); c.stroke();
+    const n = nCols(s); for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 0, x = e.first.p[0] + (e.last.p[0] - e.first.p[0]) * t, z = e.first.p[2] + (e.last.p[2] - e.first.p[2]) * t;
+      const on = pr && pr.side === s && pr.idx === i; c.fillStyle = on ? '#4ade80' : '#f0804a'; c.beginPath(); c.arc(X(x), Z(z), on ? 11 : 6, 0, 7); c.fill(); } }
+  if (S.pose) { const p = S.pose.p, f = fwd(S.pose.q); c.fillStyle = '#fff'; c.beginPath(); c.arc(X(p[0]), Z(p[2]), 7, 0, 7); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.moveTo(X(p[0]), Z(p[2])); c.lineTo(X(p[0]) + f[0] * 28, Z(p[2]) + f[2] * 28); c.stroke(); }
+}
+
+// ---------------------------------------------------------------- 解碼（從 AR 的相機畫面取灰階，約每秒 4 次）
+prepareZXingModule({ overrides: { locateFile: (p, prefix) => p.endsWith('.wasm') ? new URL('./vendor/zxing_reader.wasm', location.href).href : prefix + p }, fireImmediately: true });
+let busy = false, lastTry = 0, flip = false; const seen = new Map();
+async function maybeDecode(cpa) {
+  const t = performance.now(); if (busy || t - lastTry < 250) return; busy = true; lastTry = t;
+  const { rows, cols, rowBytes, pixels } = cpa; S.frame = `${cols}x${rows}`;
+  const out = new Uint8ClampedArray(rows * cols * 4);
+  for (let y = 0; y < rows; y++) { const si = (flip ? rows - 1 - y : y) * rowBytes; let di = y * cols * 4; for (let x = 0; x < cols; x++, di += 4) { const v = pixels[si + x]; out[di] = v; out[di + 1] = v; out[di + 2] = v; out[di + 3] = 255; } }
+  try {
+    S.decodeTries++;
+    const rs = await readBarcodes(new ImageData(out, cols, rows), { formats: ['DataMatrix'], tryHarder: true, tryRotate: true, tryDownscale: false, maxNumberOfSymbols: 1 });
+    if (rs.length) {
+      const m = rs[0].text.toUpperCase().match(/[A-Z]{2}\d{6}/), pos = rs[0].position, px = pos ? Math.round(Math.hypot(pos.topRight.x - pos.topLeft.x, pos.topRight.y - pos.topLeft.y)) : null;
+      S.decodes++; S.lastCode = `${m ? m[0] : '?'} 碼寬 ${px}px${flip ? ' 翻轉' : ''}`;
+      if (m && calibrated() && S.pose && !(seen.get(m[0]) > Date.now() - 4000)) { seen.set(m[0], Date.now()); const { pr } = sample('scan', { tag: m[0], codePx: px, frame: S.frame, flipped: flip }); log(`掃到 ${m[0]}　推算 ${pr ? cellText(pr) : '-'}`); renderAsk(); }
+    } else flip = !flip;   // 讀不到就換上下翻轉再試，不確定引擎給的畫面方向
+  } catch (e) { S.lastCode = 'decode err ' + e.message; }
+  busy = false;
+}
+
+// ---------------------------------------------------------------- 8th Wall
+function startXR() {
+  const cv = $('cam'), fit = () => { const d = Math.min(2, devicePixelRatio || 1); cv.width = Math.round(cv.clientWidth * d); cv.height = Math.round(cv.clientHeight * d); };
+  fit(); addEventListener('resize', fit);
+  const go = async () => {
+    const XR8 = window.XR8;
+    try { await XR8.loadChunk?.('slam'); } catch (e) {}
+    XR8.XrController.configure({ scale: SCALE });
+    XR8.addCameraPipelineModules([
+      XR8.GlTextureRenderer.pipelineModule(),
+      XR8.XrController.pipelineModule(),
+      XR8.CameraPixelArray.pipelineModule({ luminance: true }),
+      { name: 'pcmap-proto',
+        onCameraStatusChange: ({ status }) => { S.events.push({ t: now(), ev: 'camera', status }); if (!S.pose) $('hud').textContent = `相機：${status}`; },
+        onException: e => { S.events.push({ t: now(), ev: 'exception', msg: String(e?.message || e) }); $('hud').textContent = '錯誤：' + (e?.message || e); },
+        onUpdate: ({ processCpuResult, processGpuResult }) => {
+          const r = processCpuResult?.reality;
+          if (r?.position && r?.rotation) setPose([r.position.x, r.position.y, r.position.z], [r.rotation.w, r.rotation.x, r.rotation.y, r.rotation.z], r.trackingStatus || '-', r.trackingReason || '-');
+          const cpa = processGpuResult?.camerapixelarray; if (cpa?.pixels) maybeDecode(cpa);
+        } },
+    ]);
+    XR8.run({ canvas: cv, allowedDevices: XR8.XrConfig.device().ANY });
+  };
+  window.XR8 ? go() : addEventListener('xrloaded', go);
+}
+$('btnStart').addEventListener('click', async () => {
+  $('startwrap').hidden = true; $('hud').textContent = '啟動中…';
+  if (SIM) return;
+  try { if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) await DeviceMotionEvent.requestPermission(); } catch (e) {}
+  startXR();
+});
+
+// ---------------------------------------------------------------- 模擬：兩排櫃隔著走道面對面，假座標加雜訊與飄移
+const sim = { bias: [0, 0, 0], last: null };
+const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+function simMove(cell) {
+  const pitch = +$('simPitch').value / 100, sg = +$('simSigma').value / 100, dr = +$('simDrift').value / 100;
+  const truth = [cell.idx * pitch, cell.shelf === PC_SHELVES[0] ? 1.1 : 1.1 - 0.5 * PC_SHELVES.indexOf(cell.shelf), cell.side % 2 ? 0.9 : 0.3];
+  if (sim.last) { const d = Math.hypot(...truth.map((v, i) => v - sim.last[i])); sim.bias = sim.bias.map((b, i) => b + dr * d * [0.7, 0.1, 0.7][i]); }
+  sim.last = truth;
+  setPose(truth.map((v, i) => v + sim.bias[i] + gauss() * sg), cell.side % 2 ? [0, 0, 1, 0] : [1, 0, 0, 0], 'NORMAL', 'SIM');
+}
+if (SIM) {
+  $('pSim').hidden = false; $('startwrap').hidden = true; $('hud').textContent = '模擬模式：用下方面板移動';
+  for (let s = 0; s < G.sides.length; s++) for (const sh of PC_SHELVES) for (let i = 0; i < nCols(s); i++) { const o = document.createElement('option'); o.value = JSON.stringify({ side: s, idx: i, shelf: sh }); o.textContent = cellText({ side: s, idx: i, shelf: sh }); $('simCell').appendChild(o); }
+  $('simGo').addEventListener('click', () => { simMove(JSON.parse($('simCell').value)); renderSteps(); });
+  $('simAuto').addEventListener('click', () => {
+    $('btnRecal').click(); S.samples = []; S.trace = []; sim.bias = [0, 0, 0]; sim.last = null;
+    for (const st of STEPS) { simMove(st.cell); mark(); }
+    for (let round = 0; round < 3; round++) { S.gi = 0; while (S.gi < S.guide.length) { simMove(S.guide[S.gi]); $('btnRec').click(); } }
+    simMove(STEPS[0].cell); $('btnHome').click();
+    const g = S.samples.filter(x => x.type === 'guided'), c = k => g.filter(x => x.hit[k]).length;
+    $('simOut').textContent = `σ=${$('simSigma').value}cm 飄移=${$('simDrift').value}%/m 列寬=${$('simPitch').value}cm：${g.length} 點　全對 ${c('all')}　側 ${c('side')}　列 ${c('col')}　層 ${c('shelf')}`;
+  });
+}
+
+// ---------------------------------------------------------------- 匯出
+$('btnExport').addEventListener('click', () => {
+  $('exp').value = JSON.stringify({ format: 'pcmap-ar-proto/1', at: new Date().toISOString(), ua: navigator.userAgent, sim: SIM, scale: SCALE, grid: G, marks: S.marks, samples: S.samples, events: S.events, decodes: S.decodes, decodeTries: S.decodeTries, frame: S.frame, trace: S.trace });
+  $('dlg').showModal();
+});
+$('btnClose').addEventListener('click', () => $('dlg').close());
+$('btnCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('exp').value); log('已複製'); } catch (e) { $('exp').select(); } });
+$('btnShare').addEventListener('click', async () => { const f = new File([$('exp').value], `ar-proto-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.json`, { type: 'application/json' }); if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f] }); } catch (e) {} } });
+
+renderSteps(); draw();
+</script>
+</body>
+</html>

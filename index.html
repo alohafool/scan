@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1c2733">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>盤點掃描</title>
+<style>
+/* 手機優先：單欄、上相機下格子；資料只存在這支手機的瀏覽器裡 */
+:root { --bg:#eef1f4; --panel:#fff; --fg:#1c2733; --muted:#5d6b7a; --line:#cfd6dd; --accent:#c2410c; --accent-soft:#fde7d9;
+  --ok:#15803d; --ok-soft:#dcf2e3; --warn:#b45309; --warn-soft:#fdf0d5; --monitor:#e4e8ec; --aisle:#d9dee3; --danger:#b91c1c;
+  --mono:"IBM Plex Mono","Cascadia Mono",Consolas,Menlo,monospace; color-scheme: light }
+@media (prefers-color-scheme: dark) { :root { --bg:#161b22; --panel:#1f2630; --fg:#e6ebf0; --muted:#9aa7b4; --line:#3a4552; --accent:#f0804a; --accent-soft:#4a2a1a;
+  --ok:#4ade80; --ok-soft:#1d3b2a; --warn:#fbbf24; --warn-soft:#3d2f12; --monitor:#2a323c; --aisle:#262e38; --danger:#f87171; color-scheme: dark } }
+* { box-sizing: border-box } [hidden] { display: none !important }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif }
+body { padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)) }
+h1 { font-size: 1.2rem; margin: 10px 0 } h2 { font-size: 1rem; margin: 0 }
+.screen { display: none; gap: 12px } .screen.on { display: grid }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; min-width: 0 }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center }
+.row > * { min-width: 0 }
+button { font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); min-height: 44px }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff }
+button.ghost { background: transparent } button.danger { color: var(--danger) } button:disabled { opacity: .45 }
+input, select { font: inherit; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); min-height: 44px; width: 100% }
+input:focus { outline: none; border-color: var(--accent) }
+label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted) }
+.muted { color: var(--muted); font-size: .85rem }
+.mono { font-family: var(--mono) }
+
+/* 首頁 */
+.labcard { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center }
+.labcard .n { font-weight: 700 } .labcard .s { font-size: .85rem; color: var(--muted) }
+
+/* 格局設定 */
+.sides { display: grid; gap: 6px } .side-row { display: grid; grid-template-columns: 1fr 90px auto; gap: 6px; align-items: end }
+.kinds { display: flex; gap: 6px; flex-wrap: wrap } .kinds label { flex-direction: row; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px }
+
+/* 掃描頁 */
+.cursor { background: var(--accent-soft); border: 1.5px solid var(--accent); border-radius: 10px; padding: 8px 12px; display: grid; gap: 2px }
+.cursor .pos { font-weight: 700; font-size: 1.05rem } .cursor .slot { font-family: var(--mono); color: var(--accent); font-size: .9rem }
+.cam { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 4 / 3; max-height: 46vh; display: grid; place-items: center }
+.cam video { width: 100%; height: 100%; object-fit: cover } .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none }
+.cam .msg { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff; padding: 6px 10px; border-radius: 8px; font-size: .85rem; text-align: center }
+.cam .off { color: #bbb; font-size: .9rem; text-align: center; padding: 20px }
+.toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-weight: 600; z-index: 20; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 92vw }
+.toast.on { opacity: 1 } .toast.ok { background: var(--ok); color: #fff } .toast.warn { background: var(--warn); color: #fff } .toast.err { background: var(--danger); color: #fff }
+.manual { display: grid; grid-template-columns: 1fr auto; gap: 8px } .manual input { font-family: var(--mono); letter-spacing: .06em; text-transform: uppercase }
+
+/* 格子圖 */
+.floor { display: grid; gap: 8px } .floor.sided { grid-template-columns: 1fr 18px 1fr }
+.aisle { background: var(--aisle); border-radius: 6px; writing-mode: vertical-rl; display: flex; align-items: center; justify-content: center; font-size: .65rem; color: var(--muted); letter-spacing: .3em }
+.sidecol { display: grid; gap: 8px; min-width: 0 } .sidecol h3 { margin: 0; font-size: .8rem; color: var(--muted); text-align: center }
+.rack { border: 1px solid var(--line); border-radius: 8px; overflow: hidden }
+.rack .name { font-size: .75rem; font-weight: 700; padding: 3px 6px; background: var(--bg); border-bottom: 1px solid var(--line) }
+.shelf { display: grid; grid-template-columns: 18px repeat(var(--cols), minmax(0, 1fr)); border-top: 1px solid var(--line) } .shelf:first-of-type { border-top: 0 }
+.shelf .sl { font-size: .6rem; color: var(--muted); writing-mode: vertical-rl; display: flex; align-items: center; justify-content: center; border-right: 1px solid var(--line) }
+.cell { min-height: 40px; padding: 3px; border-left: 1px solid var(--line); position: relative; display: grid; align-content: start; gap: 2px; font-size: .62rem; line-height: 1.2 }
+.cell:first-of-type { border-left: 0 }
+.cell.monitor { background: repeating-linear-gradient(135deg, var(--monitor) 0 5px, transparent 5px 10px) } .cell.monitor::after { content: "螢幕"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted) }
+.cell.cur { outline: 3px solid var(--accent); outline-offset: -3px; background: var(--accent-soft) }
+.cell .cnt { font-weight: 700; font-size: .8rem } .cell .cnt.z { color: var(--muted); font-weight: 400 } .cell .last { font-family: var(--mono); color: var(--ok); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cell .ci { position: absolute; top: 1px; right: 3px; font-size: .55rem; color: var(--muted) }
+
+/* 這格清單 */
+.chips { display: flex; flex-wrap: wrap; gap: 6px } .chip { font: 600 .78rem var(--mono); padding: 4px 8px; border-radius: 6px; background: var(--ok-soft); color: var(--ok) }
+.chip.new { background: var(--warn-soft); color: var(--warn) }
+textarea { font: .75rem var(--mono); width: 100%; min-height: 160px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); padding: 8px }
+.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: .8rem; max-height: 160px; overflow: auto } .log li { padding: 4px 8px; background: var(--bg); border-radius: 6px }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); width: min(94vw, 520px); padding: 14px }
+dialog::backdrop { background: rgba(0,0,0,.5) }
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+
+<!-- 首頁：實驗室清單 -->
+<section class="screen on" id="home">
+  <h1>盤點掃描</h1>
+  <p class="muted">資料只存在這支手機裡。掃完按「匯出」，把 JSON 丟給 PC MAP：<span class="mono">python import_scan.py scan.json</span></p>
+  <div class="panel" id="labList"></div>
+  <div class="row"><button class="primary" id="btnNewLab">＋ 新增實驗室</button><button id="btnPresetZhunan">用竹南格局新增</button></div>
+  <p class="muted" id="ver"></p>
+</section>
+
+<!-- 格局設定 -->
+<section class="screen" id="setup">
+  <h1 id="setupTitle">新增實驗室</h1>
+  <div class="panel">
+    <label>代號（小寫英數，PC MAP 用它當檔名）<input id="fSlug" placeholder="zhunan" autocapitalize="off" autocorrect="off"></label>
+    <label>名稱<input id="fLabel" placeholder="竹南"></label>
+    <label><span>走道兩側各一排櫃？</span><select id="fSided"><option value="1">是，分左右兩側</option><option value="0">否，只有一排</option></select></label>
+    <div id="sidesBox">
+      <div class="sides" id="sides"></div>
+      <button class="ghost" id="btnAddSide">＋ 加一側</button>
+    </div>
+    <label id="racksBox" hidden>櫃數<input id="fRacks" type="number" min="1" value="4" inputmode="numeric"></label>
+    <div class="row">
+      <label style="flex:1">每櫃幾層<input id="fShelves" type="number" min="1" max="8" value="3" inputmode="numeric"></label>
+      <label style="flex:1">每層幾列（左到右）<input id="fCols" type="number" min="1" max="12" value="4" inputmode="numeric"></label>
+    </div>
+    <div><div class="muted">哪幾層是螢幕（不能放主機）</div><div class="kinds" id="kinds"></div></div>
+    <div class="row"><button class="primary" id="btnSaveLab">儲存</button><button class="ghost" id="btnCancelSetup">取消</button></div>
+  </div>
+</section>
+
+<!-- 掃描 -->
+<section class="screen" id="scan">
+  <div class="row" style="justify-content:space-between"><h2 id="scanTitle"></h2><div class="row"><button class="ghost" id="btnExport">匯出</button><button class="ghost" id="btnHome">首頁</button></div></div>
+  <div class="cursor"><div class="pos" id="pos"></div><div class="slot" id="slot"></div></div>
+  <div class="cam" id="cam">
+    <div class="off" id="camOff">按「開相機」對準貼紙上的方形碼，讀到會自動放進目前這格。</div>
+    <video id="video" playsinline muted hidden></video>
+    <canvas id="overlay"></canvas>
+    <div class="msg" id="camMsg" hidden></div>
+  </div>
+  <div class="row">
+    <button class="primary" id="btnCam">開相機</button>
+    <button id="btnPhoto">拍一張／選照片</button>
+    <input type="file" id="file" accept="image/*" capture="environment" hidden>
+    <button id="btnOcr" title="方形碼讀不到時，改讀貼紙上的文字（第一次要網路）">讀文字</button>
+  </div>
+  <div class="manual"><input id="manual" placeholder="手打財編，例如 BD123456" autocapitalize="characters" autocorrect="off"><button id="btnManual">放入</button></div>
+  <div class="row"><button id="btnNext">這格掃完，下一格 ▸</button><button id="btnUndo">復原</button></div>
+  <div class="panel">
+    <div class="row" style="justify-content:space-between"><b id="cellTitle"></b><span class="muted">點格子可換位置；同一格左→右掃</span></div>
+    <div class="chips" id="chips"></div>
+    <div class="floor" id="floor"></div>
+  </div>
+  <div class="panel"><b>最近</b><ul class="log" id="log"></ul></div>
+</section>
+
+<dialog id="dlgExport">
+  <h2>匯出 JSON</h2>
+  <p class="muted" id="expSummary"></p>
+  <textarea id="expText" readonly></textarea>
+  <div class="row" style="margin-top:8px"><button class="primary" id="btnCopy">複製</button><button id="btnShare">分享／存檔</button><button id="btnDownload">下載</button><button class="ghost" id="btnCloseExport">關閉</button></div>
+</dialog>
+
+<script type="module">
+import { prepareZXingModule, readBarcodes } from './vendor/zxing-reader.js';
+
+const VERSION = '0.1.0';
+const KEY = 'pcmap-scan:v1';
+const TAG_RE = /[A-Z]{2}\d{6}/;
+const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------- 儲存
+let S = { current: null, labs: {} };
+function load() { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v && v.labs) S = v; } catch (e) {} }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('存檔失敗：瀏覽器儲存空間不可用', 'err'); } }
+load();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+
+// ---------------------------------------------------------------- 格局工具（和 PC MAP 的 grid 同一套）
+const racksOf = g => g.sides?.length ? g.sides.reduce((a, s) => a + s.racks, 0) : g.racks;
+const kindOf = (g, s) => (g.shelf_kinds || [])[s] || 'pc';
+const pcShelves = g => [...Array(g.shelves).keys()].filter(s => kindOf(g, s) === 'pc');
+function rackLabel(g, r) {
+  if (!g.sides?.length) return `櫃 ${r + 1}`;
+  let off = 0; for (const s of g.sides) { if (r < off + s.racks) return `${s.label}櫃 ${r - off + 1}`; off += s.racks; }
+  return `櫃 ${r + 1}`;
+}
+const posText = (g, p) => `${rackLabel(g, p.rack)} · 第 ${p.col + 1} 列 · 第 ${p.shelf + 1} 層`;
+const key = p => `${p.rack}-${p.shelf}-${p.col}`;
+const parseKey = k => { const [rack, shelf, col] = k.split('-').map(Number); return { rack, shelf, col }; };
+const lab = () => S.labs[S.current];
+const cellTags = (L, k) => L.cells[k] || [];
+function whereIs(L, tag) { for (const k in L.cells) if (L.cells[k].includes(tag)) return k; return null; }
+function nextCell(g, p) {
+  const sh = pcShelves(g), i = sh.indexOf(p.shelf);
+  if (i >= 0 && i < sh.length - 1) return { ...p, shelf: sh[i + 1] };
+  if (p.col < g.per_shelf - 1) return { rack: p.rack, shelf: sh[0], col: p.col + 1 };
+  if (p.rack < racksOf(g) - 1) return { rack: p.rack + 1, shelf: sh[0], col: 0 };
+  return null;
+}
+
+// ---------------------------------------------------------------- UI 共用
+let toastTimer;
+function toast(msg, cls = '') { const t = $('toast'); t.textContent = msg; t.className = 'toast on ' + cls; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', 1800); }
+function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); if (id !== 'scan') stopCam(); }
+let audio;
+function beep(ok = true) {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = ok ? 1100 : 300; o.connect(g); g.connect(audio.destination); g.gain.value = .15; o.start(); o.stop(audio.currentTime + (ok ? .08 : .25)); } catch (e) {}
+  try { navigator.vibrate?.(ok ? 60 : [80, 60, 80]); } catch (e) {}
+}
+
+// ---------------------------------------------------------------- 首頁
+function renderHome() {
+  const box = $('labList'); box.innerHTML = '';
+  const slugs = Object.keys(S.labs);
+  if (!slugs.length) box.innerHTML = '<p class="muted">還沒有實驗室。先新增一個，填櫃子格局。</p>';
+  for (const slug of slugs) {
+    const L = S.labs[slug];
+    const n = Object.values(L.cells).reduce((a, t) => a + t.length, 0);
+    const el = document.createElement('div'); el.className = 'labcard';
+    el.innerHTML = `<div><div class="n"></div><div class="s"></div></div><div class="row"><button class="primary" data-a="scan">掃描</button><button data-a="edit">格局</button><button class="ghost danger" data-a="del">刪除</button></div>`;
+    el.querySelector('.n').textContent = `${L.label || slug}（${slug}）`;
+    el.querySelector('.s').textContent = `${racksOf(L.grid)} 櫃 × ${L.grid.shelves} 層 × ${L.grid.per_shelf} 列 · 已掃 ${n} 台`;
+    el.addEventListener('click', e => {
+      const a = e.target.dataset.a; if (!a) return;
+      if (a === 'scan') { S.current = slug; save(); openScan(); }
+      if (a === 'edit') openSetup(slug);
+      if (a === 'del') { if (confirmDel === slug) { delete S.labs[slug]; if (S.current === slug) S.current = null; save(); renderHome(); confirmDel = null; } else { confirmDel = slug; toast(`再按一次「刪除」確認刪掉 ${L.label || slug}（含掃描結果）`, 'warn'); } }
+    });
+    box.appendChild(el);
+  }
+  $('ver').textContent = `v${VERSION}`;
+}
+let confirmDel = null;
+$('btnNewLab').addEventListener('click', () => openSetup(null));
+$('btnPresetZhunan').addEventListener('click', () => openSetup(null, { slug: 'zhunan', label: '竹南', grid: { racks: 4, shelves: 3, per_shelf: 4, sides: [{ label: '左側', racks: 2 }, { label: '右側', racks: 2 }], shelf_kinds: ['monitor', 'pc', 'pc'], zones: [{ label: 'UFS', rack: 1, cols: [0, 1] }] } }));
+
+// ---------------------------------------------------------------- 格局設定
+let editing = null, presetZones = null;
+function openSetup(slug, preset) {
+  editing = slug; const L = slug ? S.labs[slug] : null;
+  const g = L ? L.grid : (preset?.grid || { racks: 2, shelves: 3, per_shelf: 4, sides: [{ label: '左側', racks: 1 }, { label: '右側', racks: 1 }], shelf_kinds: ['monitor', 'pc', 'pc'] });
+  presetZones = g.zones || null;
+  $('setupTitle').textContent = L ? `格局：${L.label || slug}` : '新增實驗室';
+  $('fSlug').value = L ? slug : (preset?.slug || ''); $('fSlug').disabled = !!L;
+  $('fLabel').value = L ? (L.label || '') : (preset?.label || '');
+  $('fSided').value = g.sides?.length ? '1' : '0';
+  $('fRacks').value = g.racks || 1; $('fShelves').value = g.shelves; $('fCols').value = g.per_shelf;
+  renderSides(g.sides?.length ? g.sides : [{ label: '左側', racks: 1 }, { label: '右側', racks: 1 }]);
+  renderKinds(g.shelves, g.shelf_kinds || []);
+  toggleSided();
+  show('setup');
+}
+function renderSides(sides) {
+  const box = $('sides'); box.innerHTML = '';
+  sides.forEach((s, i) => {
+    const row = document.createElement('div'); row.className = 'side-row';
+    row.innerHTML = `<label>側名<input class="sl" value=""></label><label>幾櫃<input class="sr" type="number" min="1" inputmode="numeric"></label><button class="ghost danger" title="移除">✕</button>`;
+    row.querySelector('.sl').value = s.label; row.querySelector('.sr').value = s.racks;
+    row.querySelector('button').addEventListener('click', () => { if (box.children.length > 1) row.remove(); });
+    box.appendChild(row);
+  });
+}
+function readSides() { return [...$('sides').querySelectorAll('.side-row')].map(r => ({ label: r.querySelector('.sl').value.trim() || '側', racks: Math.max(1, +r.querySelector('.sr').value || 1) })); }
+function renderKinds(n, kinds) {
+  const box = $('kinds'); box.innerHTML = '';
+  for (let s = 0; s < n; s++) { const l = document.createElement('label'); l.innerHTML = `<input type="checkbox"> 第 ${s + 1} 層`; l.querySelector('input').checked = kinds[s] === 'monitor'; box.appendChild(l); }
+}
+function toggleSided() { const sided = $('fSided').value === '1'; $('sidesBox').hidden = !sided; $('racksBox').hidden = sided; }
+$('fSided').addEventListener('change', toggleSided);
+$('fShelves').addEventListener('change', () => renderKinds(Math.max(1, +$('fShelves').value || 1), [...$('kinds').querySelectorAll('input')].map(i => i.checked ? 'monitor' : 'pc')));
+$('btnAddSide').addEventListener('click', () => renderSides([...readSides(), { label: '', racks: 1 }]));
+$('btnCancelSetup').addEventListener('click', () => { renderHome(); show('home'); });
+$('btnSaveLab').addEventListener('click', () => {
+  const slug = $('fSlug').value.trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(slug)) return toast('代號要是小寫英數，例如 zhunan', 'err');
+  if (!editing && S.labs[slug]) return toast('這個代號已經有了', 'err');
+  const shelves = Math.max(1, +$('fShelves').value || 1), per_shelf = Math.max(1, +$('fCols').value || 1);
+  const kinds = [...$('kinds').querySelectorAll('input')].map(i => i.checked ? 'monitor' : 'pc');
+  if (!kinds.includes('pc')) return toast('至少要有一層能放主機', 'err');
+  const g = { shelves, per_shelf, shelf_kinds: kinds };
+  if ($('fSided').value === '1') { g.sides = readSides(); g.racks = racksOf(g); } else g.racks = Math.max(1, +$('fRacks').value || 1);
+  if (presetZones) g.zones = presetZones;
+  const L = S.labs[slug] || { slug, cells: {}, log: [], cursor: null };
+  L.label = $('fLabel').value.trim() || slug; L.grid = g;
+  // 格局縮小時，掉到格子外的掃描結果移回「未定位」（保留財編，不丟）
+  for (const k of Object.keys(L.cells)) { const p = parseKey(k); if (p.rack >= g.racks || p.shelf >= g.shelves || p.col >= g.per_shelf || kindOf(g, p.shelf) !== 'pc') { L.unplaced = (L.unplaced || []).concat(L.cells[k]); delete L.cells[k]; } }
+  S.labs[slug] = L; S.current = slug; save(); openScan();
+});
+
+// ---------------------------------------------------------------- 掃描頁
+function openScan() {
+  const L = lab(); if (!L) return show('home');
+  if (!L.cursor) L.cursor = { rack: 0, shelf: pcShelves(L.grid)[0], col: 0 };
+  $('scanTitle').textContent = L.label;
+  renderScan(); show('scan'); $('manual').value = '';
+}
+function renderScan(flash) {
+  const L = lab(), g = L.grid, cur = L.cursor, k = key(cur);
+  $('pos').textContent = posText(g, cur);
+  $('slot').textContent = `下一台 = 第 ${cellTags(L, k).length + 1} 台`;
+  $('cellTitle').textContent = `這格 ${cellTags(L, k).length} 台`;
+  const chips = $('chips'); chips.innerHTML = '';
+  cellTags(L, k).forEach((t, i) => { const c = document.createElement('span'); c.className = 'chip'; c.textContent = `${i + 1}. ${t}`; chips.appendChild(c); });
+  if (!cellTags(L, k).length) chips.innerHTML = '<span class="muted">還沒掃</span>';
+  // 格子圖
+  const floor = $('floor'); floor.innerHTML = ''; floor.style.setProperty('--cols', g.per_shelf);
+  const sides = g.sides?.length ? g.sides : [{ label: '', racks: g.racks }];
+  floor.classList.toggle('sided', sides.length > 1);
+  let off = 0;
+  sides.forEach((s, si) => {
+    const col = document.createElement('div'); col.className = 'sidecol';
+    if (s.label) col.innerHTML = `<h3>${s.label}</h3>`;
+    for (let r = off; r < off + s.racks; r++) {
+      const rack = document.createElement('div'); rack.className = 'rack';
+      rack.innerHTML = `<div class="name">${rackLabel(g, r)}</div>`;
+      for (let sh = 0; sh < g.shelves; sh++) {
+        const shelf = document.createElement('div'); shelf.className = 'shelf';
+        shelf.innerHTML = `<div class="sl">${sh + 1}層</div>`;
+        for (let c = 0; c < g.per_shelf; c++) {
+          const p = { rack: r, shelf: sh, col: c }, kk = key(p), cell = document.createElement('div');
+          cell.className = 'cell' + (kindOf(g, sh) !== 'pc' ? ' monitor' : '') + (kk === k ? ' cur' : '');
+          if (kindOf(g, sh) === 'pc') {
+            const tags = cellTags(L, kk);
+            cell.innerHTML = `<span class="ci">${c + 1}列</span><span class="cnt ${tags.length ? '' : 'z'}">${tags.length ? tags.length + ' 台' : '－'}</span>` + (tags.length ? `<span class="last">${tags[tags.length - 1]}</span>` : '');
+            cell.addEventListener('click', () => { L.cursor = p; save(); renderScan(); });
+          }
+          shelf.appendChild(cell);
+        }
+        rack.appendChild(shelf);
+      }
+      col.appendChild(rack);
+    }
+    off += s.racks;
+    floor.appendChild(col);
+    if (sides.length > 1 && si < sides.length - 1) { const a = document.createElement('div'); a.className = 'aisle'; a.textContent = '走道'; floor.appendChild(a); }
+  });
+  const log = $('log'); log.innerHTML = '';
+  for (const e of L.log.slice(-8).reverse()) { const li = document.createElement('li'); li.textContent = `${e.at.slice(11, 16)} ${e.msg}`; log.appendChild(li); }
+  $('btnUndo').disabled = !(L.undo && L.undo.length);
+}
+function logMsg(L, msg) { L.log.push({ at: new Date().toISOString(), msg }); if (L.log.length > 200) L.log.splice(0, L.log.length - 200); }
+
+const recent = new Map(); // tag -> 上次放入時間，相機連續畫面去抖動
+function place(tagRaw, source) {
+  const L = lab(), g = L.grid, k = key(L.cursor);
+  const m = String(tagRaw).toUpperCase().match(TAG_RE);
+  if (!m) { toast(`讀到「${String(tagRaw).slice(0, 24)}」，不像財編`, 'err'); beep(false); return false; }
+  const tag = m[0], now = Date.now();
+  if (source === 'cam' && recent.get(tag) && now - recent.get(tag) < 3000) return false;
+  recent.set(tag, now);
+  const from = whereIs(L, tag);
+  if (from === k) { toast(`${tag} 已在這格`, 'warn'); return false; }
+  L.undo = L.undo || [];
+  if (from) { const arr = L.cells[from], idx = arr.indexOf(tag); arr.splice(idx, 1); if (!arr.length) delete L.cells[from]; L.undo.push({ tag, from, idx, to: k }); }
+  else { L.unplaced = (L.unplaced || []).filter(t => t !== tag); L.undo.push({ tag, to: k }); }
+  L.cells[k] = cellTags(L, k).concat(tag);
+  L.raw = L.raw || {}; L.raw[tag] = { raw: String(tagRaw), at: new Date().toISOString(), source };
+  logMsg(L, from ? `${tag} 從 ${posText(g, parseKey(from))} 搬到這格，第 ${L.cells[k].length} 台` : `${tag} 放到第 ${L.cells[k].length} 台`);
+  save(); renderScan(tag); beep(true);
+  toast(from ? `搬動 ${tag}` : `${tag} ✓ 第 ${L.cells[k].length} 台`, 'ok');
+  return true;
+}
+$('btnManual').addEventListener('click', () => { if (place($('manual').value, 'manual')) $('manual').value = ''; });
+$('manual').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('btnManual').click(); } });
+$('btnNext').addEventListener('click', () => { const L = lab(), n = nextCell(L.grid, L.cursor); if (!n) return toast('已經是最後一格', 'warn'); L.cursor = n; save(); renderScan(); });
+$('btnUndo').addEventListener('click', () => {
+  const L = lab(), a = L.undo?.pop(); if (!a) return;
+  const arr = L.cells[a.to] || []; arr.splice(arr.indexOf(a.tag), 1); if (!arr.length) delete L.cells[a.to];
+  if (a.from) { (L.cells[a.from] = L.cells[a.from] || []).splice(a.idx, 0, a.tag); logMsg(L, `${a.tag} 放回 ${posText(L.grid, parseKey(a.from))}`); } else logMsg(L, `${a.tag} 取消`);
+  save(); renderScan(); toast('已復原');
+});
+$('btnHome').addEventListener('click', () => { renderHome(); show('home'); });
+
+// ---------------------------------------------------------------- 解碼器（wasm 和頁面放一起，離線可用）
+prepareZXingModule({ overrides: { locateFile: (p, prefix) => p.endsWith('.wasm') ? new URL('./vendor/zxing_reader.wasm', location.href).href : prefix + p }, fireImmediately: true });
+const OPTS = { formats: ['DataMatrix', 'QRCode'], tryHarder: true, tryRotate: true, tryInvert: false, tryDownscale: true, maxNumberOfSymbols: 1 };
+async function decodeSource(src, opts = OPTS) { try { return await readBarcodes(src, opts); } catch (e) { console.warn('decode', e); return []; } }
+
+// ---------------------------------------------------------------- 相機
+const video = $('video'), overlay = $('overlay');
+let stream = null, scanning = false, frames = 0, lastFrameCanvas = null;
+async function startCam() {
+  if (!navigator.mediaDevices?.getUserMedia) return toast('這個瀏覽器不能開相機，改用「拍一張／選照片」', 'err');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false });
+  } catch (e) { return toast('相機打不開：' + (e.name === 'NotAllowedError' ? '沒有給權限' : e.message), 'err'); }
+  video.srcObject = stream; video.hidden = false; $('camOff').hidden = true; await video.play();
+  try { const [track] = stream.getVideoTracks(); const caps = track.getCapabilities?.() || {}; if (caps.focusMode?.includes('continuous')) await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
+  scanning = true; $('btnCam').textContent = '停相機'; $('camMsg').hidden = false; $('camMsg').textContent = '對準方形碼…';
+  loop();
+}
+function stopCam() { scanning = false; if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } video.hidden = true; video.srcObject = null; $('camOff').hidden = false; $('camMsg').hidden = true; $('btnCam').textContent = '開相機'; overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height); }
+$('btnCam').addEventListener('click', () => scanning ? stopCam() : startCam());
+const work = document.createElement('canvas');
+async function loop() {
+  if (!scanning) return;
+  if (video.readyState >= 2 && video.videoWidth) {
+    const w = Math.min(1280, video.videoWidth), h = Math.round(video.videoHeight * w / video.videoWidth);
+    work.width = w; work.height = h; const ctx = work.getContext('2d', { willReadFrequently: true }); ctx.drawImage(video, 0, 0, w, h);
+    lastFrameCanvas = work;
+    const t0 = performance.now();
+    const rs = await decodeSource(ctx.getImageData(0, 0, w, h));
+    frames++;
+    if (rs.length) { drawBox(rs[0].position, w, h); place(rs[0].text, 'cam'); }
+    else if (frames % 10 === 0) { $('camMsg').textContent = `掃描中（${Math.round(performance.now() - t0)} ms/格）靠近一點、避免反光`; overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height); }
+  }
+  setTimeout(loop, 60);
+}
+function drawBox(pos, w, h) {
+  if (!pos) return; overlay.width = w; overlay.height = h; const c = overlay.getContext('2d'); c.clearRect(0, 0, w, h);
+  c.strokeStyle = '#4ade80'; c.lineWidth = 6; c.beginPath();
+  [pos.topLeft, pos.topRight, pos.bottomRight, pos.bottomLeft].forEach((p, i) => i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.closePath(); c.stroke();
+  $('camMsg').textContent = '讀到了';
+}
+
+// ---------------------------------------------------------------- 拍一張／選照片（沒有相機串流時的替代）
+let lastFile = null;
+$('btnPhoto').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return; lastFile = f; e.target.value = '';
+  toast('解碼中…');
+  const rs = await decodeSource(f);
+  if (rs.length) place(rs[0].text, 'photo'); else { beep(false); toast('這張讀不到方形碼，靠近重拍，或按「讀文字」', 'warn'); }
+});
+
+// ---------------------------------------------------------------- 讀文字備援（Tesseract，第一次要網路載 ~5 MB）
+let ocrWorker = null;
+async function ocr(src) {
+  if (!window.Tesseract) {
+    toast('載入文字辨識…（需要網路）');
+    await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js'; s.onload = res; s.onerror = () => rej(new Error('載入失敗，沒有網路')); document.head.appendChild(s); });
+  }
+  if (!ocrWorker) { ocrWorker = await Tesseract.createWorker('eng'); await ocrWorker.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:' }); }
+  const { data } = await ocrWorker.recognize(src);
+  return (data.text.match(/[A-Z]{2}\s?\d{6}/g) || []).map(s => s.replace(/\s/g, ''));
+}
+$('btnOcr').addEventListener('click', async () => {
+  const src = lastFile || lastFrameCanvas; if (!src) return toast('先拍一張或開相機', 'warn');
+  try { const tags = await ocr(src); if (!tags.length) { beep(false); return toast('文字也讀不到，手打吧', 'warn'); } place(tags[0], 'ocr'); }
+  catch (e) { toast(e.message, 'err'); }
+});
+
+// ---------------------------------------------------------------- 匯出
+function exportJson() {
+  const L = lab(), scans = [];
+  for (const k of Object.keys(L.cells)) { const p = parseKey(k); L.cells[k].forEach((tag, slot) => scans.push({ tag, ...p, slot, at: L.raw?.[tag]?.at || null, raw: L.raw?.[tag]?.raw || tag, source: L.raw?.[tag]?.source || null })); }
+  scans.sort((a, b) => a.rack - b.rack || a.col - b.col || a.shelf - b.shelf || a.slot - b.slot);
+  return { format: 'pcmap-scan/1', app: `pcmap-scan ${VERSION}`, exported_at: new Date().toISOString(), lab: L.slug, label: L.label, grid: L.grid, scans, unplaced: L.unplaced || [] };
+}
+$('btnExport').addEventListener('click', () => {
+  const j = exportJson(); $('expText').value = JSON.stringify(j, null, 1);
+  $('expSummary').textContent = `${j.label}：${j.scans.length} 台，${Object.keys(lab().cells).length} 格。檔名建議 scan-${j.lab}-${j.exported_at.slice(0, 10)}.json`;
+  $('dlgExport').showModal();
+});
+$('btnCloseExport').addEventListener('click', () => $('dlgExport').close());
+$('btnCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('expText').value); toast('已複製', 'ok'); } catch (e) { $('expText').select(); toast('請長按全選複製', 'warn'); } });
+const fname = () => `scan-${lab().slug}-${new Date().toISOString().slice(0, 10)}.json`;
+$('btnShare').addEventListener('click', async () => {
+  const file = new File([$('expText').value], fname(), { type: 'application/json' });
+  if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: fname() }); } catch (e) {} }
+  else toast('這個瀏覽器不支援分享檔案，用「複製」或「下載」', 'warn');
+});
+$('btnDownload').addEventListener('click', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([$('expText').value], { type: 'application/json' })); a.download = fname(); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); });
+
+// ---------------------------------------------------------------- 啟動（?test=/photos/zhunan/BD123456.jpg 可在電腦上用照片驗證解碼）
+renderHome();
+if (S.current && S.labs[S.current]) openScan(); else show('home');
+const test = new URLSearchParams(location.search).get('test');
+if (test && lab()) { fetch(test).then(r => r.blob()).then(async b => { const rs = await decodeSource(b); if (rs.length) place(rs[0].text, 'test'); else toast('test 圖讀不到', 'err'); }); }
+</script>
+</body>
+</html>
