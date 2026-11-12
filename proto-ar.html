@@ -44,6 +44,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .ask { font-weight: 700; font-size: 1.05rem; color: var(--warn) }
 .note { color: var(--warn); font-weight: 700 } .err { color: var(--bad); white-space: pre-wrap }
 button.on { outline: 2px solid var(--accent); outline-offset: 1px }
+.pair { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap }
 details > * { margin-top: 8px } summary { margin-top: 0; color: var(--muted) }
 .stats { font: 12px/1.5 var(--mono); white-space: pre-wrap }
 ol { margin: 0; padding-left: 20px } li.done { color: var(--ok) } li.cur { color: var(--warn); font-weight: 700 }
@@ -83,13 +84,14 @@ a { color: var(--accent) }
 <div class="panel" id="pCal">
   <b>1. 校正這一側（4 個點）</b>
   <div class="row" id="sideBtns"></div>
+  <div class="row"><span>校正用的列</span><label class="pair">頭 <select id="selA"></select></label><label class="pair">尾 <select id="selB"></select></label></div>
   <div class="note" id="calNote" hidden>追蹤中斷過，之前的校正已作廢。請重新校正這一側。</div>
   <ol id="calSteps"></ol>
   <div class="row"><button class="primary" id="btnMark" disabled>標記這個位置</button><button id="btnRecal">重新校正這一側</button></div>
   <div class="err" id="calErr" hidden></div>
   <div class="row" id="forceRow" hidden><button id="btnForce">不重做，仍然使用這次校正</button></div>
   <div class="stats" id="calInfo"></div>
-  <div class="muted">每個點都要走到那一格正前方，手機像掃貼紙一樣貼近那一格正中央，拿穩再按。不要從遠處對著它按。轉身和走動放慢。</div>
+  <div class="muted">頭尾兩列預設是第 1 列和最後一列。那一格如果是空的，改選有放電腦的列，兩列離得越遠越好。每個點都要走到那一格正前方，手機像掃貼紙一樣貼近那一格正中央，拿穩再按。不要從遠處對著它按。轉身和走動放慢。</div>
 </div>
 
 <div class="panel" id="pTest" hidden>
@@ -139,10 +141,12 @@ const rackOff = s => G.sides.slice(0, s).reduce((a, x) => a + x.racks, 0);
 const cellText = c => `${G.sides[c.side].label}櫃 ${Math.floor(c.idx / G.per_shelf) + 1} · 第 ${c.idx % G.per_shelf + 1} 列 · 第 ${c.shelf + 1} 層`;
 const cellOut = c => ({ side: c.side, idx: c.idx, rack: rackOff(c.side) + Math.floor(c.idx / G.per_shelf), col: c.idx % G.per_shelf, shelf: c.shelf });
 
-// 每一側各自校正 4 個點：第 1 列的上下兩層、最後一列的上下兩層。
-// 兩側做法完全一樣，都從第 1 列開始：每側掃完會回第 1 個校正點檢查飄移，人剛好在另一側第 1 列的對面。
+// 每一側各自校正 4 個點：頭那一列的上下兩層、尾那一列的上下兩層。
+// 頭尾預設是第 1 列和最後一列，可以改：空的格子沒有東西可以對準，改挑有放電腦、離得遠的兩列比較準。
+const ENDS = {};   // side -> [頭 idx, 尾 idx]
+const endsOf = s => ENDS[s] || [0, nCols(s) - 1];
 function stepsFor(s) {
-  const n = nCols(s), a = 0, b = n - 1;
+  const [a, b] = endsOf(s);
   const st = [{ end: 'A', idx: a, shelf: SH_A }, { end: 'A', idx: a, shelf: SH_B }, { end: 'B', idx: b, shelf: SH_B }, { end: 'B', idx: b, shelf: SH_A }];
   return (SH_A === SH_B ? [st[0], st[3]] : st).map(x => ({ ...x, cell: { side: s, idx: x.idx, shelf: x.shelf } }));
 }
@@ -195,7 +199,7 @@ function buildCal(side, ms, steps) {
   const gA = hA[SH_A] - hA[SH_B], gB = hB[SH_A] - hB[SH_B], gap = PC_SHELVES.length > 1 ? (Math.abs(gA) + Math.abs(gB)) / 2 / (PC_SHELVES.length - 1) : null;
   const fs = avg(ms.map(m => [m.f[0], m.f[2]])), fl = Math.hypot(...fs) || 1;
   const spread = a => a.length > 1 ? Math.hypot(a[0].p[0] - a[1].p[0], a[0].p[2] - a[1].p[2]) : 0;
-  return { side, gen: S.gen, t: now(), A, B, idxA: steps[0].idx, idxB: steps[steps.length - 1].idx, hA, hB, f: [fs[0] / fl, fs[1] / fl], L, pitch: n > 1 ? L / (n - 1) : L, gap, gA, gB, spreadA: spread(mA), spreadB: spread(mB), m0: ms[0].p };
+  return { side, gen: S.gen, t: now(), A, B, idxA: steps[0].idx, idxB: steps[steps.length - 1].idx, hA, hB, f: [fs[0] / fl, fs[1] / fl], L, pitch: L / Math.max(1, Math.abs(steps[steps.length - 1].idx - steps[0].idx)), gap, gA, gB, spreadA: spread(mA), spreadB: spread(mB), m0: ms[0].p };
 }
 // 校正自己前後一不一致。第一次實測時右排量出來是左排的 2.5 倍，頁面卻照收。
 function checkCal(c) {
@@ -208,8 +212,8 @@ function checkCal(c) {
   for (const [nm, v] of [['第一端', c.spreadA], ['另一端', c.spreadB]]) if (v > 0.6 * c.pitch) pr.push(`${nm}上下兩個點的水平位置差了 ${(v / c.pitch).toFixed(1)} 個列寬，應該在同一列`);
   const o = Object.values(S.cal).find(x => x.side !== c.side);
   if (o) {
-    const r = c.L / o.L, cos = Math.abs(((c.B[0] - c.A[0]) * (o.B[0] - o.A[0]) + (c.B[1] - c.A[1]) * (o.B[1] - o.A[1])) / (c.L * o.L || 1e-9));
-    if (r < 0.7 || r > 1.43) pr.push(`這一排的長度是${G.sides[o.side].label}的 ${r.toFixed(2)} 倍，應該差不多`);
+    const r = c.pitch / o.pitch, cos = Math.abs(((c.B[0] - c.A[0]) * (o.B[0] - o.A[0]) + (c.B[1] - c.A[1]) * (o.B[1] - o.A[1])) / (c.L * o.L || 1e-9));
+    if (r < 0.7 || r > 1.43) pr.push(`這一側的列寬是${G.sides[o.side].label}的 ${r.toFixed(2)} 倍，應該差不多`);
     if (cos < Math.cos(25 * Math.PI / 180)) pr.push(`這一排和${G.sides[o.side].label}夾了 ${Math.round(Math.acos(Math.min(1, cos)) * 180 / Math.PI)} 度，應該平行`);
   }
   if (SCALE === 'absolute') {   // 公尺模式才知道實際尺寸
@@ -218,7 +222,7 @@ function checkCal(c) {
   }
   return pr;
 }
-function accept(c) { S.cal[c.side] = c; S.rejected = null; S.pending = []; S.invalid = false; buildGuide(); log(`✓ ${G.sides[c.side].label}校正完成：排長 ${unit(c.L)}、列寬 ${unit(c.pitch)}${c.gap ? `、層距 ${unit(c.gap)}` : ''}`, 'hit'); }
+function accept(c) { S.cal[c.side] = c; S.rejected = null; S.pending = []; S.invalid = false; buildGuide(); log(`✓ ${G.sides[c.side].label}校正完成：頭尾相距 ${unit(c.L)}、列寬 ${unit(c.pitch)}${c.gap ? `、層距 ${unit(c.gap)}` : ''}`, 'hit'); }
 function mark() {
   const steps = stepsFor(S.side);
   if (!S.pose || !tracking() || S.cal[S.side] || S.pending.length >= steps.length) return;
@@ -245,21 +249,29 @@ function render() {
   $('sideBtns').innerHTML = '';
   G.sides.forEach((sd, s) => { const b = document.createElement('button'); b.textContent = sd.label + (S.cal[s] ? ' ✓' : ''); b.className = s === S.side ? 'on' : ''; b.addEventListener('click', () => { if (s !== S.side) setSide(s); }); $('sideBtns').appendChild(b); });
   $('calNote').hidden = !S.invalid;
+  const [ea, eb] = endsOf(S.side);
+  for (const [id, v] of [['selA', ea], ['selB', eb]]) { const sel = $(id); sel.innerHTML = ''; for (let i = 0; i < nCols(S.side); i++) { const o = document.createElement('option'); o.value = i; o.textContent = `櫃 ${Math.floor(i / G.per_shelf) + 1} 第 ${i % G.per_shelf + 1} 列`; sel.appendChild(o); } sel.value = v; }
   $('calSteps').innerHTML = '';
   steps.forEach((st, i) => { const li = document.createElement('li'); li.textContent = cellText(st.cell) + ' 正中央'; li.className = c || i < S.pending.length ? 'done' : i === S.pending.length ? 'cur' : ''; $('calSteps').appendChild(li); });
   $('calErr').hidden = !S.rejected; $('forceRow').hidden = !S.rejected;
   if (S.rejected) $('calErr').textContent = '這次校正前後不一致，請從第 1 個點重做：\n' + S.rejected.problems.map(p => '・' + p).join('\n');
-  $('calInfo').textContent = c ? `✓ ${G.sides[S.side].label}已校正${c.forced ? '（強制使用）' : ''}：排長 ${unit(c.L)}　列寬 ${unit(c.pitch)}${c.gap ? `　層距 ${unit(c.gap)}` : ''}` : '';
+  $('calInfo').textContent = c ? `✓ ${G.sides[S.side].label}已校正${c.forced ? '（強制使用）' : ''}：頭尾相距 ${unit(c.L)}　列寬 ${unit(c.pitch)}${c.gap ? `　層距 ${unit(c.gap)}` : ''}` : '';
   $('pTest').hidden = !c;
   renderAsk();
 }
 $('btnMark').addEventListener('click', mark);
+function setEnds(a, b) {   // 換了校正用的列，這一側的校正要重做
+  if (a === b) { log('頭和尾不能選同一列', 'miss'); render(); return; }
+  ENDS[S.side] = [a, b]; delete S.cal[S.side]; S.pending = []; S.rejected = null; S.events.push({ t: now(), ev: 'ends', side: S.side, ends: [a, b] }); log(`${G.sides[S.side].label}校正改用第 ${a + 1} 和第 ${b + 1} 個位置`); render();
+}
+$('selA').addEventListener('change', () => setEnds(+$('selA').value, +$('selB').value));
+$('selB').addEventListener('change', () => setEnds(+$('selA').value, +$('selB').value));
 $('btnRecal').addEventListener('click', () => { delete S.cal[S.side]; S.pending = []; S.rejected = null; S.events.push({ t: now(), ev: 'recalibrate', side: S.side }); log(`重新校正${G.sides[S.side].label}`); render(); });
 $('btnForce').addEventListener('click', () => { if (!S.rejected) return; const c = S.rejected.c; c.forced = true; const last = S.cals[S.cals.length - 1]; last.forced = true; last.accepted = true; accept(c); render(); });
 
 // ---------------------------------------------------------------- 測試
 function buildGuide() {   // 逐格測試的順序：從校正結束的那一端蛇行走回來
-  const st = stepsFor(S.side), a = st[0].idx, b = st[st.length - 1].idx;
+  const a = 0, b = nCols(S.side) - 1;
   const seq = (from, to) => { const r = []; for (let i = from; from <= to ? i <= to : i >= to; i += from <= to ? 1 : -1) r.push(i); return r; };
   S.guide = []; S.gi = 0; PC_SHELVES.forEach((sh, k) => (k % 2 ? seq(a, b) : seq(b, a)).forEach(idx => S.guide.push({ side: S.side, idx, shelf: sh })));
 }
@@ -456,7 +468,7 @@ if (SIM) {
     const g = S.samples.filter(x => x.type === 'guided' && x.hit), k = key => g.filter(x => x.hit[key]).length;
     $('simOut').textContent = `σ=${$('simSigma').value}cm 飄移=${$('simDrift').value}%/m 列寬=${$('simPitch').value}cm：${g.length} 點　全對 ${k('all')}　側 ${k('side')}　列 ${k('col')}　層 ${k('shelf')}　已校正 ${Object.keys(S.cal).length}/${G.sides.length} 側`;
   });
-  window.__proto = { S, sim, simMove, mark, predict, setSide, onTag, stepsFor, fwd };   // 桌機驗證用
+  window.__proto = { S, sim, simMove, mark, predict, setSide, setEnds, onTag, stepsFor, fwd };   // 桌機驗證用
 }
 
 // ---------------------------------------------------------------- 匯出
