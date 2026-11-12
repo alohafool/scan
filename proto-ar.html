@@ -7,7 +7,9 @@
 <!--
   PROTOTYPE，驗證完就刪，不是正式功能。
   要回答的問題：iPhone 瀏覽器用 8th Wall 的世界追蹤（SLAM），能不能在實驗室裡知道手機在哪一側、哪一列、哪一層？
-  做法：先在幾個已知位置按「標記」校正，之後每個位置由手機座標推算格子，和實際格子比對，算命中率與飄移。
+  做法：每一側先在頭尾兩列、上下兩層按「標記」校正（4 個點），之後由手機座標推算格子，和實際格子比對。
+  第 2 版（第一次現場實測後改的）：追蹤中斷會提示、中斷時不能標記、中斷後校正作廢；校正完檢查前後是否一致；
+  每側各自校正，層高沿著排內插；超出校正範圍會標出來，不再硬夾到最後一格；可選公尺模式（scale=absolute）。
   桌機沒有相機：網址加 ?sim=1 用假座標驗證推算邏輯。
   資料只在記憶體，重新整理就沒了；測完按「匯出紀錄」。
 -->
@@ -23,13 +25,26 @@ h1 { font-size: 1rem; margin: 6px 0 0; display: flex; gap: 8px; align-items: cen
 #cam { width: 100%; height: 100%; display: block }
 .hud { position: absolute; left: 6px; top: 6px; right: 6px; font: 11px/1.35 var(--mono); color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; white-space: pre-wrap; pointer-events: none }
 .big { position: absolute; left: 6px; right: 6px; bottom: 6px; background: rgba(0,0,0,.6); border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 1.05rem; text-align: center }
-.startwrap { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.6) }
+.big.off { background: rgba(248,113,113,.9); color: #000 }
+.count { position: absolute; right: 6px; top: 58px; background: rgba(0,0,0,.7); border: 2px solid var(--ok); color: var(--ok); border-radius: 999px; padding: 2px 12px; font-weight: 800; font-size: 1.05rem }
+.flash { position: absolute; inset: 0; background: var(--ok); pointer-events: none; animation: flash .7s ease-out forwards } .flash.rep { background: var(--warn) }
+@keyframes flash { from { opacity: .85 } to { opacity: 0 } }
+.toast { position: absolute; left: 6px; right: 6px; top: 26%; display: grid; gap: 2px; padding: 12px 10px; border-radius: 12px; text-align: center; pointer-events: none; color: #000; background: var(--ok); border: 3px solid #fff; box-shadow: 0 4px 18px rgba(0,0,0,.6) }
+.toast.rep { background: var(--warn) } .toast b { font-size: 1.9rem; line-height: 1.15; font-weight: 800 } .toast span { font-size: 1.05rem; font-weight: 700 }
+.camwrap.hit { outline: 5px solid var(--ok) } .camwrap.hitrep { outline: 5px solid var(--warn) }
+ul.scanned { list-style: none; margin: 0; padding: 0; max-height: 132px; overflow: auto; font-size: .92rem } ul.scanned li { padding: 3px 0; border-bottom: 1px dashed var(--line); display: flex; gap: 8px; flex-wrap: wrap } ul.scanned li b { font-family: var(--mono) } ul.scanned li.new { color: var(--ok) }
+.warn { position: absolute; left: 6px; right: 6px; top: 34%; background: rgba(248,113,113,.93); color: #000; font-weight: 700; font-size: 1.05rem; padding: 10px; border-radius: 8px; text-align: center }
+.startwrap { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.7) }
+.startbox { display: grid; gap: 8px; padding: 10px; max-width: 420px }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 8px }
 .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center }
 button { font: inherit; font-weight: 600; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--line); background: #2a323c; color: var(--fg); min-height: 42px }
 button.primary { background: var(--accent); border-color: var(--accent); color: #000 } button:disabled { opacity: .4 }
 .muted { color: var(--muted); font-size: .82rem } .mono { font-family: var(--mono) }
 .ask { font-weight: 700; font-size: 1.05rem; color: var(--warn) }
+.note { color: var(--warn); font-weight: 700 } .err { color: var(--bad); white-space: pre-wrap }
+button.on { outline: 2px solid var(--accent); outline-offset: 1px }
+details > * { margin-top: 8px } summary { margin-top: 0; color: var(--muted) }
 .stats { font: 12px/1.5 var(--mono); white-space: pre-wrap }
 ol { margin: 0; padding-left: 20px } li.done { color: var(--ok) } li.cur { color: var(--warn); font-weight: 700 }
 #map { width: 100%; height: 190px; background: #0d1117; border-radius: 8px }
@@ -43,30 +58,51 @@ a { color: var(--accent) }
 </style>
 </head>
 <body>
-<h1><span class="tag">PROTOTYPE</span> AR 定位實測 <span class="muted" id="mode"></span></h1>
+<h1><span class="tag">PROTOTYPE</span> AR 定位實測 v2 <span class="muted" id="mode"></span></h1>
 
 <div class="camwrap">
   <canvas id="cam"></canvas>
   <div class="hud" id="hud">尚未啟動</div>
+  <div class="warn" id="warn" hidden></div>
+  <div class="flash" id="flash" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <div class="count" id="count" hidden></div>
   <div class="big" id="big" hidden></div>
-  <div class="startwrap" id="startwrap"><button class="primary" id="btnStart">開始（會要相機與動作感測權限）</button></div>
+  <div class="startwrap" id="startwrap"><div class="startbox">
+    <button class="primary" id="btnStartAbs">開始：公尺模式（先試這個）</button>
+    <button id="btnStartRes">開始：一般模式</button>
+    <div class="muted">會要相機與動作感測權限。按下開始會響一聲，沒聽到代表手機在靜音，掃到時仍會閃綠色。公尺模式啟動後，慢慢前後左右移動手機幾秒，等上方狀態變成 NORMAL。超過半分鐘還不行，重新整理頁面改用一般模式。</div>
+  </div></div>
+</div>
+
+<div class="panel" id="pScanned" hidden>
+  <b id="scannedTitle"></b>
+  <ul class="scanned" id="scanned"></ul>
 </div>
 
 <div class="panel" id="pCal">
-  <b>1. 校正：手機拿在掃貼紙的距離，對準下面的位置，按「標記」</b>
+  <b>1. 校正這一側（4 個點）</b>
+  <div class="row" id="sideBtns"></div>
+  <div class="note" id="calNote" hidden>追蹤中斷過，之前的校正已作廢。請重新校正這一側。</div>
   <ol id="calSteps"></ol>
-  <div class="row"><button class="primary" id="btnMark" disabled>標記這個位置</button><button id="btnRecal">重新校正</button></div>
-  <div class="muted">每側只標頭尾兩列，中間的列用等分推算；尺度誤差會被抵消，所以不用量尺寸。</div>
+  <div class="row"><button class="primary" id="btnMark" disabled>標記這個位置</button><button id="btnRecal">重新校正這一側</button></div>
+  <div class="err" id="calErr" hidden></div>
+  <div class="row" id="forceRow" hidden><button id="btnForce">不重做，仍然使用這次校正</button></div>
+  <div class="stats" id="calInfo"></div>
+  <div class="muted">每個點都要走到那一格正前方，手機像掃貼紙一樣貼近那一格正中央，拿穩再按。不要從遠處對著它按。轉身和走動放慢。</div>
 </div>
 
 <div class="panel" id="pTest" hidden>
-  <b>2. 測試</b>
-  <div class="ask" id="ask"></div>
-  <div class="row">
-    <button class="primary" id="btnRec">到了，記錄</button><button id="btnSkip">跳過</button><button id="btnHome">回到起點檢查飄移</button>
-  </div>
-  <div class="muted">照提示走到那一格，像掃貼紙一樣拿好再按。畫面下方的大字是手機目前推算的格子。相機若讀到貼紙的方形碼，也會自動記一筆。</div>
+  <b>2. 把這一側每台電腦的貼紙各掃一次</b>
+  <div class="muted">順序隨意，不用按按鈕。讀到貼紙時畫面會閃綠色、跳出財編並發出提示音，右上角的台數加一。閃黃色代表這台已經掃過，可以換下一台。這一側掃完後，回到第 1 個校正點按「檢查飄移」，再切到另一側重複。</div>
   <div class="stats" id="stats"></div>
+  <div class="row"><button id="btnHome">我回到第 1 個校正點了，檢查飄移</button></div>
+  <details>
+    <summary>逐格測試（選做：沒有貼紙或讀不到的格子用）</summary>
+    <div class="ask" id="ask"></div>
+    <div class="row"><button class="primary" id="btnRec">到了，記錄</button><button id="btnSkip">跳過</button></div>
+    <div class="muted">照提示對準那一格，像掃貼紙一樣拿好再按。</div>
+  </details>
 </div>
 
 <div class="panel"><canvas id="map" width="700" height="380"></canvas><ul class="log" id="log"></ul>
@@ -74,8 +110,8 @@ a { color: var(--accent) }
 
 <div class="panel" id="pSim" hidden>
   <b>模擬（桌機驗證用）</b>
-  <div class="row">雜訊 σ <input type="number" id="simSigma" value="10" min="0"> 公分　飄移 <input type="number" id="simDrift" value="1" min="0" step="0.5"> %／公尺　列寬 <input type="number" id="simPitch" value="100" min="20"> 公分</div>
-  <div class="row"><select id="simCell"></select><button id="simGo">移到這格</button><button class="primary" id="simAuto">自動校正＋跑完全部</button></div>
+  <div class="row">雜訊 σ <input type="number" id="simSigma" value="3" min="0"> 公分　飄移 <input type="number" id="simDrift" value="1" min="0" step="0.5"> %／公尺　列寬 <input type="number" id="simPitch" value="40" min="20"> 公分</div>
+  <div class="row"><select id="simCell"></select><button id="simGo">移到這格</button><button id="simLoss">模擬追蹤中斷（比例變 3 倍）</button><button class="primary" id="simAuto">自動校正＋跑完全部</button></div>
   <div class="stats" id="simOut"></div>
 </div>
 
@@ -90,109 +126,172 @@ import { prepareZXingModule, readBarcodes } from './vendor/zxing-reader.js';
 const $ = id => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
 const SIM = Q.has('sim');
-const SCALE = Q.get('scale') === 'absolute' ? 'absolute' : 'responsive';
-$('mode').textContent = SIM ? '模擬模式' : `scale=${SCALE}`;
+let SCALE = Q.get('scale') === 'responsive' ? 'responsive' : 'absolute';
+const showMode = () => { $('mode').textContent = SIM ? '模擬模式' : SCALE === 'absolute' ? '公尺模式' : '一般模式'; };
+if (SIM) showMode();
 
-// ---------------------------------------------------------------- 格局（竹南；和 PC MAP 的 grid 同欄位）
+// ---------------------------------------------------------------- 格局（兩側各兩櫃、每櫃四列三層；欄位和登錄表的 grid 相同）
 const G = { sides: [{ label: '左側', racks: 2 }, { label: '右側', racks: 2 }], shelves: 3, per_shelf: 4, shelf_kinds: ['monitor', 'pc', 'pc'] };
 const PC_SHELVES = [...Array(G.shelves).keys()].filter(s => G.shelf_kinds[s] === 'pc');
+const SH_A = PC_SHELVES[0], SH_B = PC_SHELVES[PC_SHELVES.length - 1];
 const nCols = s => G.sides[s].racks * G.per_shelf;
 const rackOff = s => G.sides.slice(0, s).reduce((a, x) => a + x.racks, 0);
 const cellText = c => `${G.sides[c.side].label}櫃 ${Math.floor(c.idx / G.per_shelf) + 1} · 第 ${c.idx % G.per_shelf + 1} 列 · 第 ${c.shelf + 1} 層`;
 const cellOut = c => ({ side: c.side, idx: c.idx, rack: rackOff(c.side) + Math.floor(c.idx / G.per_shelf), col: c.idx % G.per_shelf, shelf: c.shelf });
 
-// 校正步驟：第 0 側頭（第一個 pc 層）、其餘 pc 層的高度、第 0 側尾；之後各側交替尾／頭，少走路
-function buildSteps() {
-  const st = [{ side: 0, end: 'first', shelf: PC_SHELVES[0] }];
-  for (const sh of PC_SHELVES.slice(1)) st.push({ side: 0, end: 'first', shelf: sh, heightOnly: true });
-  st.push({ side: 0, end: 'last', shelf: PC_SHELVES[0] });
-  for (let s = 1; s < G.sides.length; s++) { const order = s % 2 ? ['last', 'first'] : ['first', 'last']; for (const end of order) st.push({ side: s, end, shelf: PC_SHELVES[0] }); }
-  return st.map(x => ({ ...x, cell: { side: x.side, idx: x.end === 'first' ? 0 : nCols(x.side) - 1, shelf: x.shelf } }));
+// 每一側各自校正 4 個點：第 1 列的上下兩層、最後一列的上下兩層。
+// 兩側做法完全一樣，都從第 1 列開始：每側掃完會回第 1 個校正點檢查飄移，人剛好在另一側第 1 列的對面。
+function stepsFor(s) {
+  const n = nCols(s), a = 0, b = n - 1;
+  const st = [{ end: 'A', idx: a, shelf: SH_A }, { end: 'A', idx: a, shelf: SH_B }, { end: 'B', idx: b, shelf: SH_B }, { end: 'B', idx: b, shelf: SH_A }];
+  return (SH_A === SH_B ? [st[0], st[3]] : st).map(x => ({ ...x, cell: { side: s, idx: x.idx, shelf: x.shelf } }));
 }
-const STEPS = buildSteps();
 
 // ---------------------------------------------------------------- 狀態（全部在記憶體）
+// gen：校正世代。追蹤一中斷，座標系和比例尺就可能換掉，所以世代加一、校正全部作廢。
 const T0 = Date.now();
-const S = { pose: null, status: '-', reason: '-', fps: 0, frame: null, cal: { ends: {}, heights: {} }, marks: [], step: 0, samples: [], trace: [], events: [], guide: [], gi: 0, decodes: 0, decodeTries: 0 };
+const S = { pose: null, status: '-', reason: '-', everNormal: false, fps: 0, frame: null, lastCode: '', lastTag: null,
+  gen: 0, side: 0, pending: [], cal: {}, rejected: null, invalid: false, losses: 0,
+  marks: [], cals: [], samples: [], trace: [], events: [], guide: [], gi: 0, decodes: 0, decodeTries: 0 };
 const now = () => Math.round((Date.now() - T0) / 100) / 10;
 const fwd = q => { const [w, x, y, z] = q; return [-(2 * (x * z + w * y)), -(2 * (y * z - w * x)), -(1 - 2 * (x * x + y * y))]; };
 const r3 = v => v.map(n => Math.round(n * 1000) / 1000);
-const calibrated = () => S.step >= STEPS.length;
+const round3 = o => JSON.parse(JSON.stringify(o, (k, v) => typeof v === 'number' ? Math.round(v * 1000) / 1000 : v));
+const tracking = () => S.status === 'NORMAL';
+const unit = v => SCALE === 'absolute' ? `${Math.round(v * 100)} 公分` : v.toFixed(2);
 
 // ---------------------------------------------------------------- 由座標推算格子
 function predict(p, f) {
   const cands = [];
-  for (let s = 0; s < G.sides.length; s++) {
-    const e = S.cal.ends[s]; if (!e?.first || !e?.last) continue;
-    const A = e.first.p, B = e.last.p, dx = B[0] - A[0], dz = B[2] - A[2], L = Math.hypot(dx, dz) || 1e-9, n = nCols(s);
-    const t = ((p[0] - A[0]) * dx + (p[2] - A[2]) * dz) / (L * L);
-    const perp = Math.abs((p[0] - A[0]) * dz - (p[2] - A[2]) * dx) / L;
-    const pitch = n > 1 ? L / (n - 1) : L, u = t * (n - 1), idx = Math.max(0, Math.min(n - 1, Math.round(u)));
-    const nf = [e.first.f[0] + e.last.f[0], e.first.f[2] + e.last.f[2]], nl = Math.hypot(...nf) || 1, fl = Math.hypot(f[0], f[2]);
-    const face = fl > 0.5 ? (f[0] * nf[0] + f[2] * nf[1]) / (fl * nl) : null;   // 手機朝向和這一側校正時的朝向有多一致
-    cands.push({ side: s, idx, u, perp, pitch, face });
+  for (const c of Object.values(S.cal)) {
+    const dx = c.B[0] - c.A[0], dz = c.B[1] - c.A[1], L2 = dx * dx + dz * dz || 1e-9, n = nCols(c.side);
+    const t = ((p[0] - c.A[0]) * dx + (p[2] - c.A[1]) * dz) / L2, tc = Math.max(0, Math.min(1, t));
+    const perp = Math.abs((p[0] - c.A[0]) * dz - (p[2] - c.A[1]) * dx) / Math.sqrt(L2);
+    const u = c.idxA + t * (c.idxB - c.idxA), idx = Math.max(0, Math.min(n - 1, Math.round(u)));
+    const fl = Math.hypot(f[0], f[2]), face = fl > 0.5 ? (f[0] * c.f[0] + f[2] * c.f[1]) / fl : null;   // 手機朝向和這一側校正時的朝向有多一致
+    // 層：兩端各量過上下層的高度，沿著排線性內插，取最近的那一層
+    let shelf = SH_A, dy = 0, best = Infinity;
+    PC_SHELVES.forEach((sh, k) => {
+      const w = PC_SHELVES.length > 1 ? k / (PC_SHELVES.length - 1) : 0;
+      const hA = c.hA[SH_A] + (c.hA[SH_B] - c.hA[SH_A]) * w, hB = c.hB[SH_A] + (c.hB[SH_B] - c.hB[SH_A]) * w, d = p[1] - (hA + (hB - hA) * tc);
+      if (Math.abs(d) < best) { best = Math.abs(d); shelf = sh; dy = d; }
+    });
+    const off = u < -0.75 || u > n - 0.25 || (c.gap ? Math.abs(dy) > 0.75 * c.gap : false);   // 超出校正範圍就明講，不硬夾
+    cands.push({ side: c.side, idx, u, perp, pitch: c.pitch, gap: c.gap, face, shelf, dy, off });
   }
   if (!cands.length) return null;
   const faces = cands.map(c => c.face);
-  const byFace = faces.every(v => v !== null) && Math.max(...faces) - Math.min(...faces) > 0.5;
+  const byFace = cands.length > 1 && faces.every(v => v !== null) && Math.max(...faces) - Math.min(...faces) > 0.5;
   const c = cands.reduce((a, b) => (byFace ? b.face > a.face : b.perp < a.perp) ? b : a);
-  let shelf = PC_SHELVES[0], dy = 0, best = Infinity;
-  for (const sh of PC_SHELVES) { const h = S.cal.heights[sh]; if (h == null) continue; const d = Math.abs(p[1] - h); if (d < best) { best = d; shelf = sh; dy = p[1] - h; } }
-  return { side: c.side, idx: c.idx, shelf, u: c.u, lateral: c.u - c.idx, perpCols: c.perp / c.pitch, dyCols: dy / c.pitch, pitch: c.pitch, sideBy: byFace ? 'facing' : 'nearest' };
+  return { side: c.side, idx: c.idx, shelf: c.shelf, u: c.u, lateral: c.u - c.idx, perpCols: c.perp / c.pitch, dyGaps: c.gap ? c.dy / c.gap : 0, off: c.off, sideBy: cands.length > 1 ? (byFace ? 'facing' : 'nearest') : 'only' };
 }
 
 // ---------------------------------------------------------------- 校正
-function renderSteps() {
+function buildCal(side, ms, steps) {
+  const avg = a => [a.reduce((s, v) => s + v[0], 0) / a.length, a.reduce((s, v) => s + v[1], 0) / a.length];
+  const mA = ms.filter((m, i) => steps[i].end === 'A'), mB = ms.filter((m, i) => steps[i].end === 'B');
+  const A = avg(mA.map(m => [m.p[0], m.p[2]])), B = avg(mB.map(m => [m.p[0], m.p[2]])), L = Math.hypot(B[0] - A[0], B[1] - A[1]), n = nCols(side);
+  const H = arr => Object.fromEntries(arr.map(m => [m.cell.shelf, m.p[1]])), hA = H(mA), hB = H(mB);
+  const gA = hA[SH_A] - hA[SH_B], gB = hB[SH_A] - hB[SH_B], gap = PC_SHELVES.length > 1 ? (Math.abs(gA) + Math.abs(gB)) / 2 / (PC_SHELVES.length - 1) : null;
+  const fs = avg(ms.map(m => [m.f[0], m.f[2]])), fl = Math.hypot(...fs) || 1;
+  const spread = a => a.length > 1 ? Math.hypot(a[0].p[0] - a[1].p[0], a[0].p[2] - a[1].p[2]) : 0;
+  return { side, gen: S.gen, t: now(), A, B, idxA: steps[0].idx, idxB: steps[steps.length - 1].idx, hA, hB, f: [fs[0] / fl, fs[1] / fl], L, pitch: n > 1 ? L / (n - 1) : L, gap, gA, gB, spreadA: spread(mA), spreadB: spread(mB), m0: ms[0].p };
+}
+// 校正自己前後一不一致。第一次實測時右排量出來是左排的 2.5 倍，頁面卻照收。
+function checkCal(c) {
+  const pr = [];
+  if (!(c.pitch > 1e-6)) pr.push('頭尾兩列量到同一個位置');
+  if (PC_SHELVES.length > 1) {
+    if (c.gA * c.gB <= 0) pr.push('頭尾兩端的上下層方向相反');
+    else if (c.gB / c.gA < 0.6 || c.gB / c.gA > 1.67) pr.push(`頭尾兩端量到的層距差太多（${unit(Math.abs(c.gA))} 對 ${unit(Math.abs(c.gB))}）`);
+  }
+  for (const [nm, v] of [['第一端', c.spreadA], ['另一端', c.spreadB]]) if (v > 0.6 * c.pitch) pr.push(`${nm}上下兩個點的水平位置差了 ${(v / c.pitch).toFixed(1)} 個列寬，應該在同一列`);
+  const o = Object.values(S.cal).find(x => x.side !== c.side);
+  if (o) {
+    const r = c.L / o.L, cos = Math.abs(((c.B[0] - c.A[0]) * (o.B[0] - o.A[0]) + (c.B[1] - c.A[1]) * (o.B[1] - o.A[1])) / (c.L * o.L || 1e-9));
+    if (r < 0.7 || r > 1.43) pr.push(`這一排的長度是${G.sides[o.side].label}的 ${r.toFixed(2)} 倍，應該差不多`);
+    if (cos < Math.cos(25 * Math.PI / 180)) pr.push(`這一排和${G.sides[o.side].label}夾了 ${Math.round(Math.acos(Math.min(1, cos)) * 180 / Math.PI)} 度，應該平行`);
+  }
+  if (SCALE === 'absolute') {   // 公尺模式才知道實際尺寸
+    if (c.pitch < 0.1 || c.pitch > 1.5) pr.push(`列寬算出來是 ${Math.round(c.pitch * 100)} 公分，不合理`);
+    if (c.gap != null && (c.gap < 0.15 || c.gap > 1.2)) pr.push(`層距算出來是 ${Math.round(c.gap * 100)} 公分，不合理`);
+  }
+  return pr;
+}
+function accept(c) { S.cal[c.side] = c; S.rejected = null; S.pending = []; S.invalid = false; buildGuide(); log(`✓ ${G.sides[c.side].label}校正完成：排長 ${unit(c.L)}、列寬 ${unit(c.pitch)}${c.gap ? `、層距 ${unit(c.gap)}` : ''}`, 'hit'); }
+function mark() {
+  const steps = stepsFor(S.side);
+  if (!S.pose || !tracking() || S.cal[S.side] || S.pending.length >= steps.length) return;
+  S.rejected = null;
+  const st = steps[S.pending.length], m = { gen: S.gen, side: S.side, step: S.pending.length, cell: cellOut(st.cell), t: now(), p: r3(S.pose.p), q: r3(S.pose.q), f: r3(fwd(S.pose.q)), status: S.status };
+  S.marks.push(m); S.pending.push(m); log(`標記 ${cellText(st.cell)}`);
+  if (S.pending.length === steps.length) {
+    const c = buildCal(S.side, S.pending, steps), problems = checkCal(c);
+    S.cals.push(round3({ ...c, problems, accepted: !problems.length }));   // 每一次校正都留紀錄，包含被退回的
+    if (problems.length) { S.rejected = { c, problems }; S.pending = []; log('校正前後不一致，請重做：' + problems.join('；'), 'miss'); }
+    else accept(c);
+  }
+  render();
+}
+function setSide(s) { S.side = s; S.pending = []; S.rejected = null; buildGuide(); S.events.push({ t: now(), ev: 'side', side: s }); render(); }
+function trackingLost() {
+  S.losses++;
+  if (!Object.keys(S.cal).length && !S.pending.length) return;
+  S.events.push({ t: now(), ev: 'cal_invalidated', gen: S.gen, sides: Object.keys(S.cal).map(Number), pending: S.pending.length });
+  S.gen++; S.cal = {}; S.pending = []; S.rejected = null; S.invalid = true; log('追蹤中斷，校正作廢。恢復後請重新校正這一側', 'miss');
+}
+function render() {
+  const steps = stepsFor(S.side), c = S.cal[S.side];
+  $('sideBtns').innerHTML = '';
+  G.sides.forEach((sd, s) => { const b = document.createElement('button'); b.textContent = sd.label + (S.cal[s] ? ' ✓' : ''); b.className = s === S.side ? 'on' : ''; b.addEventListener('click', () => { if (s !== S.side) setSide(s); }); $('sideBtns').appendChild(b); });
+  $('calNote').hidden = !S.invalid;
   $('calSteps').innerHTML = '';
-  STEPS.forEach((st, i) => { const li = document.createElement('li'); li.textContent = cellText(st.cell) + ' 正中央' + (st.heightOnly ? '（只記高度）' : ''); li.className = i < S.step ? 'done' : i === S.step ? 'cur' : ''; $('calSteps').appendChild(li); });
-  $('btnMark').disabled = !S.pose || calibrated();
-  $('pTest').hidden = !calibrated();
-  if (calibrated() && !S.guide.length) buildGuide();
+  steps.forEach((st, i) => { const li = document.createElement('li'); li.textContent = cellText(st.cell) + ' 正中央'; li.className = c || i < S.pending.length ? 'done' : i === S.pending.length ? 'cur' : ''; $('calSteps').appendChild(li); });
+  $('calErr').hidden = !S.rejected; $('forceRow').hidden = !S.rejected;
+  if (S.rejected) $('calErr').textContent = '這次校正前後不一致，請從第 1 個點重做：\n' + S.rejected.problems.map(p => '・' + p).join('\n');
+  $('calInfo').textContent = c ? `✓ ${G.sides[S.side].label}已校正${c.forced ? '（強制使用）' : ''}：排長 ${unit(c.L)}　列寬 ${unit(c.pitch)}${c.gap ? `　層距 ${unit(c.gap)}` : ''}` : '';
+  $('pTest').hidden = !c;
   renderAsk();
 }
-function mark() {
-  if (!S.pose || calibrated()) return;
-  const st = STEPS[S.step], m = { step: S.step, cell: cellOut(st.cell), t: now(), p: r3(S.pose.p), q: r3(S.pose.q), f: r3(fwd(S.pose.q)), status: S.status };
-  S.marks.push(m);
-  if (!st.heightOnly) (S.cal.ends[st.side] = S.cal.ends[st.side] || {})[st.end] = { p: S.pose.p.slice(), f: fwd(S.pose.q) };
-  if (st.side === 0 && st.end === 'first') S.cal.heights[st.shelf] = S.pose.p[1];
-  S.step++; log(`標記 ${cellText(st.cell)}`); renderSteps();
-}
 $('btnMark').addEventListener('click', mark);
-$('btnRecal').addEventListener('click', () => { S.cal = { ends: {}, heights: {} }; S.step = 0; S.guide = []; S.gi = 0; S.events.push({ t: now(), ev: 'recalibrate' }); log('重新校正'); renderSteps(); });
+$('btnRecal').addEventListener('click', () => { delete S.cal[S.side]; S.pending = []; S.rejected = null; S.events.push({ t: now(), ev: 'recalibrate', side: S.side }); log(`重新校正${G.sides[S.side].label}`); render(); });
+$('btnForce').addEventListener('click', () => { if (!S.rejected) return; const c = S.rejected.c; c.forced = true; const last = S.cals[S.cals.length - 1]; last.forced = true; last.accepted = true; accept(c); render(); });
 
-// ---------------------------------------------------------------- 引導測試
-function buildGuide() {
-  S.guide = []; S.gi = 0;
-  for (let s = 0; s < G.sides.length; s++) PC_SHELVES.forEach((sh, k) => { const ids = [...Array(nCols(s)).keys()]; if (k % 2) ids.reverse(); ids.forEach(idx => S.guide.push({ side: s, idx, shelf: sh })); });
+// ---------------------------------------------------------------- 測試
+function buildGuide() {   // 逐格測試的順序：從校正結束的那一端蛇行走回來
+  const st = stepsFor(S.side), a = st[0].idx, b = st[st.length - 1].idx;
+  const seq = (from, to) => { const r = []; for (let i = from; from <= to ? i <= to : i >= to; i += from <= to ? 1 : -1) r.push(i); return r; };
+  S.guide = []; S.gi = 0; PC_SHELVES.forEach((sh, k) => (k % 2 ? seq(a, b) : seq(b, a)).forEach(idx => S.guide.push({ side: S.side, idx, shelf: sh })));
 }
 function renderAsk() {
-  if (!calibrated()) return;
-  $('ask').textContent = S.gi < S.guide.length ? `第 ${S.gi + 1}/${S.guide.length} 格：請對準 ${cellText(S.guide[S.gi])}` : '全部走完了。可以匯出紀錄，或按「跳過」再走一輪。';
-  const g = S.samples.filter(x => x.type === 'guided'), n = g.length, c = k => g.filter(x => x.hit[k]).length;
-  const home = S.samples.filter(x => x.type === 'home').map(x => x.driftCols.toFixed(2)).join('、');
-  $('stats').textContent = n ? `引導 ${n} 點　全對 ${c('all')}/${n}　側 ${c('side')}/${n}　列 ${c('col')}/${n}　層 ${c('shelf')}/${n}\n列方向平均偏移 ${(g.reduce((a, x) => a + Math.abs(x.err.u), 0) / n).toFixed(2)} 列寬（超過 0.5 就會判錯列）\n回起點飄移：${home || '還沒測'} 列寬　解碼 ${S.decodes} 次` : `解碼 ${S.decodes} 次`;
+  if (!S.cal[S.side]) return;
+  $('ask').textContent = S.gi < S.guide.length ? `第 ${S.gi + 1}/${S.guide.length} 格：請對準 ${cellText(S.guide[S.gi])}` : '這一側走完了。按「跳過」可以再走一輪。';
+  const sc = S.samples.filter(x => x.type === 'scan' && x.gen === S.gen && x.pred && x.pred.side === S.side), tags = new Set(sc.map(x => x.tag));
+  const g = S.samples.filter(x => x.type === 'guided' && x.hit), n = g.length, k = key => g.filter(x => x.hit[key]).length;
+  const home = S.samples.filter(x => x.type === 'home').map(x => `列 ${x.driftCols.toFixed(2)}／層 ${x.driftGaps == null ? '-' : x.driftGaps.toFixed(2)}`).join('、');
+  $('stats').textContent = `這次校正後，這一側已掃到 ${tags.size} 台（${sc.length} 筆）　追蹤中斷 ${S.losses} 次\n回第 1 點的飄移（超過 0.5 會判錯）：${home || '還沒測'}` + (n ? `\n逐格 ${n} 點　全對 ${k('all')}　側 ${k('side')}　列 ${k('col')}　層 ${k('shelf')}` : '');
 }
 function sample(type, extra) {
-  const p = S.pose.p.slice(), q = S.pose.q.slice(), pr = predict(p, fwd(q));
-  const s = { type, t: now(), p: r3(p), q: r3(q), status: S.status, pred: pr ? { ...cellOut(pr), u: +pr.u.toFixed(3), lateral: +pr.lateral.toFixed(3), perpCols: +pr.perpCols.toFixed(3), dyCols: +pr.dyCols.toFixed(3), sideBy: pr.sideBy } : null, ...extra };
+  const p = S.pose.p.slice(), q = S.pose.q.slice(), pr = tracking() ? predict(p, fwd(q)) : null;
+  const s = { type, t: now(), gen: S.gen, p: r3(p), q: r3(q), status: S.status, pred: pr ? { ...cellOut(pr), u: +pr.u.toFixed(3), lateral: +pr.lateral.toFixed(3), perpCols: +pr.perpCols.toFixed(3), dyGaps: +pr.dyGaps.toFixed(3), off: pr.off, sideBy: pr.sideBy } : null, ...extra };
   S.samples.push(s); return { s, pr };
 }
 $('btnRec').addEventListener('click', () => {
-  if (!S.pose || S.gi >= S.guide.length) return;
-  const asked = S.guide[S.gi], { s, pr } = sample('guided', { asked: cellOut(asked) });
-  s.hit = { side: pr.side === asked.side, col: pr.side === asked.side && pr.idx === asked.idx, shelf: pr.shelf === asked.shelf }; s.hit.all = s.hit.col && s.hit.shelf;
+  if (!S.pose || !tracking() || !S.cal[S.side] || S.gi >= S.guide.length) return;
+  const asked = S.guide[S.gi], lastTag = S.lastTag && now() - S.lastTag.t < 8 ? S.lastTag.tag : null, { s, pr } = sample('guided', { asked: cellOut(asked), lastTag });
+  s.hit = { side: pr.side === asked.side, col: pr.side === asked.side && pr.idx === asked.idx && !pr.off, shelf: pr.shelf === asked.shelf && !pr.off }; s.hit.all = s.hit.col && s.hit.shelf;
   s.err = { u: pr.side === asked.side ? +(pr.u - asked.idx).toFixed(3) : 99 };
-  log(`${s.hit.all ? '✓' : '✗'} 要 ${cellText(asked)}　推算 ${cellText(pr)}　偏 ${s.err.u} 列`, s.hit.all ? 'hit' : 'miss');
+  log(`${s.hit.all ? '✓' : '✗'} 要 ${cellText(asked)}　推算 ${cellText(pr)}${pr.off ? '（超出範圍）' : ''}　偏 ${s.err.u} 列`, s.hit.all ? 'hit' : 'miss');
   S.gi++; renderAsk();
 });
 $('btnSkip').addEventListener('click', () => { S.gi = S.gi < S.guide.length ? S.gi + 1 : 0; renderAsk(); });
 $('btnHome').addEventListener('click', () => {
-  if (!S.pose || !S.marks.length) return; const m = S.marks[0], e = S.cal.ends[0];
-  const d = Math.hypot(S.pose.p[0] - m.p[0], S.pose.p[1] - m.p[1], S.pose.p[2] - m.p[2]);
-  const pitch = Math.hypot(e.last.p[0] - e.first.p[0], e.last.p[2] - e.first.p[2]) / Math.max(1, nCols(0) - 1);
-  const { s } = sample('home', { drift: +d.toFixed(3), driftCols: +(d / pitch).toFixed(3) });
-  log(`回起點：差 ${s.driftCols} 列寬${SCALE === 'absolute' ? `（約 ${Math.round(d * 100)} 公分）` : ''}`); renderAsk();
+  const c = S.cal[S.side]; if (!S.pose || !tracking() || !c) return;
+  // 沿著排的偏移決定列會不會判錯；垂直於排的偏移（離櫃面遠近）不影響列，分開記
+  const dx = c.B[0] - c.A[0], dz = c.B[1] - c.A[1], ex = S.pose.p[0] - c.m0[0], ez = S.pose.p[2] - c.m0[2], dV = S.pose.p[1] - c.m0[1];
+  const { s } = sample('home', { side: S.side, driftCols: +((ex * dx + ez * dz) / c.L / c.pitch).toFixed(3), driftPerpCols: +((ex * dz - ez * dx) / c.L / c.pitch).toFixed(3), driftGaps: c.gap ? +(dV / c.gap).toFixed(3) : null });
+  const bad = Math.max(Math.abs(s.driftCols), Math.abs(s.driftGaps || 0)) > 0.5;
+  log(`回第 1 點：沿著排差 ${s.driftCols} 列寬、離櫃面差 ${s.driftPerpCols} 列寬${s.driftGaps == null ? '' : `、高度差 ${s.driftGaps} 層`}（列或層超過 0.5 就會判錯）`, bad ? 'miss' : 'hit'); renderAsk();
 });
 
 // ---------------------------------------------------------------- 畫面
@@ -200,41 +299,83 @@ function log(msg, cls = '') { const li = document.createElement('li'); li.classN
 let lastTrace = 0, frames = 0, fpsT = performance.now();
 function setPose(p, q, status, reason) {
   S.pose = { p, q }; frames++;
-  if (status !== S.status || reason !== S.reason) { S.status = status; S.reason = reason; S.events.push({ t: now(), ev: 'tracking', status, reason }); }
+  if (status !== S.status || reason !== S.reason) {
+    const was = S.status; S.status = status; S.reason = reason; S.events.push({ t: now(), ev: 'tracking', status, reason });
+    if (status === 'NORMAL') S.everNormal = true; else if (was === 'NORMAL') trackingLost();
+    render();
+  }
   const t = performance.now();
   if (t - fpsT > 1000) { S.fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t; }
-  if (t - lastTrace > 500 && S.trace.length < 6000) { lastTrace = t; S.trace.push([now(), ...r3(p)]); }
-  if ($('btnMark').disabled && !calibrated()) $('btnMark').disabled = false;
+  if (t - lastTrace > 500 && S.trace.length < 6000) { lastTrace = t; const f = fwd(q); S.trace.push([now(), ...r3(p), status === 'NORMAL' ? 1 : 0, Math.round(Math.atan2(f[0], -f[2]) * 180 / Math.PI)]); }
 }
 function draw() {
   requestAnimationFrame(draw);
-  const P = S.pose;
-  $('hud').textContent = P ? `追蹤 ${S.status}/${S.reason}　${S.fps} fps\nx ${P.p[0].toFixed(2)}  y ${P.p[1].toFixed(2)}  z ${P.p[2].toFixed(2)}\n畫面 ${S.frame || '-'}　解碼 ${S.decodes}/${S.decodeTries}${S.lastCode ? '　' + S.lastCode : ''}` : $('hud').textContent;
-  const pr = P && calibrated() ? predict(P.p, fwd(P.q)) : null;
-  $('big').hidden = !pr; if (pr) $('big').textContent = `推算：${cellText(pr)}`;
+  const P = S.pose, ok = tracking();
+  if (P) $('hud').textContent = `追蹤 ${S.status}/${S.reason}　${S.fps} fps　中斷 ${S.losses} 次\nx ${P.p[0].toFixed(2)}  y ${P.p[1].toFixed(2)}  z ${P.p[2].toFixed(2)}\n畫面 ${S.frame || '-'}　解碼 ${S.decodes}/${S.decodeTries}${S.lastCode ? '　' + S.lastCode : ''}`;
+  $('warn').hidden = !P || ok;
+  if (P && !ok) $('warn').textContent = S.everNormal ? '追蹤中斷：手機拿穩，退後一點，對著有東西的地方慢慢移動，等它恢復' : '正在初始化：慢慢前後左右移動手機，等狀態變成 NORMAL';
+  $('btnMark').disabled = !(P && ok) || !!S.cal[S.side];
+  const pr = P && ok ? predict(P.p, fwd(P.q)) : null;
+  $('big').hidden = !pr; if (pr) { $('big').textContent = `推算：${cellText(pr)}${pr.off ? '（超出校正範圍）' : ''}`; $('big').classList.toggle('off', pr.off); }
   drawMap(pr);
 }
 function drawMap(pr) {
   const cv = $('map'), c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height);
-  const pts = S.marks.map(m => m.p).concat(S.trace.slice(-600).map(t => t.slice(1))); if (S.pose) pts.push(S.pose.p);
+  const cur = S.marks.filter(m => m.gen === S.gen);
+  const pts = cur.map(m => m.p).concat(S.trace.slice(-600).map(t => t.slice(1, 4))); if (S.pose) pts.push(S.pose.p);
   if (!pts.length) return;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); }
   const span = Math.max(x1 - x0, z1 - z0, 0.5) * 1.25, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, k = Math.min(cv.width, cv.height) / span;
   const X = x => cv.width / 2 + (x - cx) * k, Z = z => cv.height / 2 + (z - cz) * k;
   c.strokeStyle = '#3a4552'; c.lineWidth = 1.5; c.beginPath(); S.trace.slice(-600).forEach((t, i) => i ? c.lineTo(X(t[1]), Z(t[3])) : c.moveTo(X(t[1]), Z(t[3]))); c.stroke();
+  c.fillStyle = '#fbbf24'; for (const m of S.pending) c.fillRect(X(m.p[0]) - 5, Z(m.p[2]) - 5, 10, 10);
   c.font = '18px sans-serif';
-  for (let s = 0; s < G.sides.length; s++) { const e = S.cal.ends[s]; if (!e?.first) continue;
-    c.fillStyle = '#f0804a'; c.fillText(G.sides[s].label, X(e.first.p[0]) + 8, Z(e.first.p[2]) - 8);
-    if (!e.last) { c.fillRect(X(e.first.p[0]) - 5, Z(e.first.p[2]) - 5, 10, 10); continue; }
-    c.strokeStyle = '#f0804a'; c.lineWidth = 3; c.beginPath(); c.moveTo(X(e.first.p[0]), Z(e.first.p[2])); c.lineTo(X(e.last.p[0]), Z(e.last.p[2])); c.stroke();
-    const n = nCols(s); for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 0, x = e.first.p[0] + (e.last.p[0] - e.first.p[0]) * t, z = e.first.p[2] + (e.last.p[2] - e.first.p[2]) * t;
-      const on = pr && pr.side === s && pr.idx === i; c.fillStyle = on ? '#4ade80' : '#f0804a'; c.beginPath(); c.arc(X(x), Z(z), on ? 11 : 6, 0, 7); c.fill(); } }
-  if (S.pose) { const p = S.pose.p, f = fwd(S.pose.q); c.fillStyle = '#fff'; c.beginPath(); c.arc(X(p[0]), Z(p[2]), 7, 0, 7); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.moveTo(X(p[0]), Z(p[2])); c.lineTo(X(p[0]) + f[0] * 28, Z(p[2]) + f[2] * 28); c.stroke(); }
+  for (const e of Object.values(S.cal)) {
+    c.fillStyle = '#f0804a'; c.fillText(G.sides[e.side].label, X(e.A[0]) + 8, Z(e.A[1]) - 8);
+    c.strokeStyle = '#f0804a'; c.lineWidth = 3; c.beginPath(); c.moveTo(X(e.A[0]), Z(e.A[1])); c.lineTo(X(e.B[0]), Z(e.B[1])); c.stroke();
+    const n = nCols(e.side); for (let i = 0; i < n; i++) { const t = e.idxB === e.idxA ? 0 : (i - e.idxA) / (e.idxB - e.idxA), x = e.A[0] + (e.B[0] - e.A[0]) * t, z = e.A[1] + (e.B[1] - e.A[1]) * t;
+      const on = pr && !pr.off && pr.side === e.side && pr.idx === i; c.fillStyle = on ? '#4ade80' : '#f0804a'; c.beginPath(); c.arc(X(x), Z(z), on ? 11 : 6, 0, 7); c.fill(); }
+  }
+  if (S.pose) { const p = S.pose.p, f = fwd(S.pose.q); c.fillStyle = tracking() ? '#fff' : '#f87171'; c.beginPath(); c.arc(X(p[0]), Z(p[2]), 7, 0, 7); c.fill(); c.strokeStyle = c.fillStyle; c.lineWidth = 3; c.beginPath(); c.moveTo(X(p[0]), Z(p[2])); c.lineTo(X(p[0]) + f[0] * 28, Z(p[2]) + f[2] * 28); c.stroke(); }
 }
 
 // ---------------------------------------------------------------- 解碼（從 AR 的相機畫面取灰階，約每秒 4 次）
 prepareZXingModule({ overrides: { locateFile: (p, prefix) => p.endsWith('.wasm') ? new URL('./vendor/zxing_reader.wasm', location.href).href : prefix + p }, fireImmediately: true });
 let busy = false, lastTry = 0, flip = false; const seen = new Map();
+// 掃到貼紙的回饋要一眼看得出來：整個畫面閃一下、中間跳出財編、提示音、右上角台數。第一次實測時只有角落的小字，使用者不知道有沒有掃到。
+let AC = null, fbTimer = 0;
+function beep(freq, ms, delay = 0) {
+  if (!AC) return;
+  try { const o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime + delay; o.frequency.value = freq; g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + ms / 1000); o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + ms / 1000); } catch (e) {}
+}
+function feedback(tag, line, again) {
+  const t = $('toast'), f = $('flash'), cw = t.parentElement;
+  t.innerHTML = ''; const b = document.createElement('b'), sp = document.createElement('span'); b.textContent = (again ? '已掃過 ' : '✓ ') + tag; sp.textContent = line; t.append(b, sp);
+  t.className = 'toast' + (again ? ' rep' : ''); t.hidden = false;
+  f.hidden = true; void f.offsetWidth; f.className = 'flash' + (again ? ' rep' : ''); f.hidden = false;   // 重新觸發閃爍動畫
+  cw.classList.remove('hit', 'hitrep'); cw.classList.add(again ? 'hitrep' : 'hit');
+  clearTimeout(fbTimer); fbTimer = setTimeout(() => { t.hidden = true; f.hidden = true; cw.classList.remove('hit', 'hitrep'); }, 2500);
+  if (again) beep(440, 160); else { beep(1175, 90); beep(1568, 160, 0.1); }
+  try { navigator.vibrate?.(again ? 40 : [60, 40, 60]); } catch (e) {}
+}
+function renderScanned() {   // 每個財編留最新一筆，最新的在最上面
+  const last = new Map(); for (const x of S.samples) if (x.type === 'scan') { last.delete(x.tag); last.set(x.tag, x); }
+  const rows = [...last.values()].reverse();
+  $('count').hidden = !rows.length; $('count').textContent = `已掃 ${rows.length} 台`;
+  $('pScanned').hidden = !rows.length; $('scannedTitle').textContent = `已掃到 ${rows.length} 台（最新的在最上面）`;
+  $('scanned').innerHTML = '';
+  rows.forEach((x, i) => { const li = document.createElement('li'), b = document.createElement('b'), sp = document.createElement('span'); b.textContent = x.tag; sp.textContent = x.pred ? cellText(x.pred) + (x.pred.off ? '（超出校正範圍）' : '') : '沒有推算'; if (!i) li.className = 'new'; li.append(b, sp); $('scanned').appendChild(li); });
+}
+function onTag(tag, extra) {   // 讀到貼紙：不管有沒有校正都留座標；有校正且追蹤正常才有推算
+  if (!S.pose || seen.get(tag) > Date.now() - 4000) return;
+  seen.set(tag, Date.now());
+  const rep = S.samples.filter(x => x.type === 'scan' && x.tag === tag && x.gen === S.gen).length, again = S.samples.some(x => x.type === 'scan' && x.tag === tag);
+  const { pr } = sample('scan', { tag, rep, ...extra });
+  S.lastTag = { tag, t: now() };
+  const line = pr ? '推算 ' + cellText(pr) + (pr.off ? '（超出校正範圍）' : '') : tracking() ? '已記錄。尚未校正，沒有推算位置' : '已記錄。追蹤中斷，沒有推算位置';
+  feedback(tag, line, again); renderScanned();
+  log(`掃到 ${tag}　${line}`, pr && !pr.off ? '' : 'miss'); renderAsk();
+}
 async function maybeDecode(cpa) {
   const t = performance.now(); if (busy || t - lastTry < 250) return; busy = true; lastTry = t;
   const { rows, cols, rowBytes, pixels } = cpa; S.frame = `${cols}x${rows}`;
@@ -246,7 +387,7 @@ async function maybeDecode(cpa) {
     if (rs.length) {
       const m = rs[0].text.toUpperCase().match(/[A-Z]{2}\d{6}/), pos = rs[0].position, px = pos ? Math.round(Math.hypot(pos.topRight.x - pos.topLeft.x, pos.topRight.y - pos.topLeft.y)) : null;
       S.decodes++; S.lastCode = `${m ? m[0] : '?'} 碼寬 ${px}px${flip ? ' 翻轉' : ''}`;
-      if (m && calibrated() && S.pose && !(seen.get(m[0]) > Date.now() - 4000)) { seen.set(m[0], Date.now()); const { pr } = sample('scan', { tag: m[0], codePx: px, frame: S.frame, flipped: flip }); log(`掃到 ${m[0]}　推算 ${pr ? cellText(pr) : '-'}`); renderAsk(); }
+      if (m) onTag(m[0], { codePx: px, frame: S.frame, flipped: flip });
     } else flip = !flip;   // 讀不到就換上下翻轉再試，不確定引擎給的畫面方向
   } catch (e) { S.lastCode = 'decode err ' + e.message; }
   busy = false;
@@ -277,47 +418,57 @@ function startXR() {
   };
   window.XR8 ? go() : addEventListener('xrloaded', go);
 }
-$('btnStart').addEventListener('click', async () => {
-  $('startwrap').hidden = true; $('hud').textContent = '啟動中…';
-  if (SIM) return;
+async function start(scale) {
+  SCALE = scale; showMode(); $('startwrap').hidden = true; $('hud').textContent = '啟動中…'; S.events.push({ t: now(), ev: 'start', scale });
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); AC.resume?.(); beep(880, 80); } catch (e) {}   // 音效要在點按當下建立，iOS 才放行；順便響一聲讓人知道音效有開
   try { if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) await DeviceMotionEvent.requestPermission(); } catch (e) {}
   startXR();
-});
+}
+$('btnStartAbs').addEventListener('click', () => start('absolute'));
+$('btnStartRes').addEventListener('click', () => start('responsive'));
 
-// ---------------------------------------------------------------- 模擬：兩排櫃隔著走道面對面，假座標加雜訊與飄移
-const sim = { bias: [0, 0, 0], last: null };
+// ---------------------------------------------------------------- 模擬：兩排櫃隔著走道面對面，假座標加雜訊與飄移；k 是比例尺（追蹤中斷後會變）
+const sim = { bias: [0, 0, 0], last: null, k: 1, cell: null };
 const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
-function simMove(cell) {
+function simMove(cell, status = 'NORMAL') {
   const pitch = +$('simPitch').value / 100, sg = +$('simSigma').value / 100, dr = +$('simDrift').value / 100;
-  const truth = [cell.idx * pitch, cell.shelf === PC_SHELVES[0] ? 1.1 : 1.1 - 0.5 * PC_SHELVES.indexOf(cell.shelf), cell.side % 2 ? 0.9 : 0.3];
+  const truth = [cell.idx * pitch, 1.1 - 0.5 * PC_SHELVES.indexOf(cell.shelf), cell.side % 2 ? 0.9 : 0.3];
   if (sim.last) { const d = Math.hypot(...truth.map((v, i) => v - sim.last[i])); sim.bias = sim.bias.map((b, i) => b + dr * d * [0.7, 0.1, 0.7][i]); }
-  sim.last = truth;
-  setPose(truth.map((v, i) => v + sim.bias[i] + gauss() * sg), cell.side % 2 ? [0, 0, 1, 0] : [1, 0, 0, 0], 'NORMAL', 'SIM');
+  sim.last = truth; sim.cell = cell;
+  setPose(truth.map((v, i) => (v + sim.bias[i] + gauss() * sg) * sim.k), cell.side % 2 ? [0, 0, 1, 0] : [1, 0, 0, 0], status, 'SIM');
 }
 if (SIM) {
   $('pSim').hidden = false; $('startwrap').hidden = true; $('hud').textContent = '模擬模式：用下方面板移動';
   for (let s = 0; s < G.sides.length; s++) for (const sh of PC_SHELVES) for (let i = 0; i < nCols(s); i++) { const o = document.createElement('option'); o.value = JSON.stringify({ side: s, idx: i, shelf: sh }); o.textContent = cellText({ side: s, idx: i, shelf: sh }); $('simCell').appendChild(o); }
-  $('simGo').addEventListener('click', () => { simMove(JSON.parse($('simCell').value)); renderSteps(); });
+  $('simGo').addEventListener('click', () => { simMove(JSON.parse($('simCell').value)); render(); });
+  $('simLoss').addEventListener('click', () => { const c = sim.cell || stepsFor(S.side)[0].cell; simMove(c, 'LIMITED'); sim.k *= 3; simMove(c, 'NORMAL'); render(); });
+  addEventListener('pointerdown', () => { if (!AC) try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }, { once: true });
   $('simAuto').addEventListener('click', () => {
-    $('btnRecal').click(); S.samples = []; S.trace = []; sim.bias = [0, 0, 0]; sim.last = null;
-    for (const st of STEPS) { simMove(st.cell); mark(); }
-    for (let round = 0; round < 3; round++) { S.gi = 0; while (S.gi < S.guide.length) { simMove(S.guide[S.gi]); $('btnRec').click(); } }
-    simMove(STEPS[0].cell); $('btnHome').click();
-    const g = S.samples.filter(x => x.type === 'guided'), c = k => g.filter(x => x.hit[k]).length;
-    $('simOut').textContent = `σ=${$('simSigma').value}cm 飄移=${$('simDrift').value}%/m 列寬=${$('simPitch').value}cm：${g.length} 點　全對 ${c('all')}　側 ${c('side')}　列 ${c('col')}　層 ${c('shelf')}`;
+    S.gen++; S.cal = {}; S.samples = []; S.trace = []; sim.bias = [0, 0, 0]; sim.last = null; sim.k = 1;
+    for (let s = 0; s < G.sides.length; s++) {
+      setSide(s);
+      for (const st of stepsFor(s)) { simMove(st.cell); mark(); }
+      if (!S.cal[s]) continue;   // 校正被退回就不測這一側
+      for (let round = 0; round < 3; round++) for (let i = 0; i < S.guide.length; i++) { S.gi = i; simMove(S.guide[i]); $('btnRec').click(); }
+      simMove(stepsFor(s)[0].cell); $('btnHome').click();
+    }
+    renderScanned();
+    const g = S.samples.filter(x => x.type === 'guided' && x.hit), k = key => g.filter(x => x.hit[key]).length;
+    $('simOut').textContent = `σ=${$('simSigma').value}cm 飄移=${$('simDrift').value}%/m 列寬=${$('simPitch').value}cm：${g.length} 點　全對 ${k('all')}　側 ${k('side')}　列 ${k('col')}　層 ${k('shelf')}　已校正 ${Object.keys(S.cal).length}/${G.sides.length} 側`;
   });
+  window.__proto = { S, sim, simMove, mark, predict, setSide, onTag, stepsFor, fwd };   // 桌機驗證用
 }
 
 // ---------------------------------------------------------------- 匯出
 $('btnExport').addEventListener('click', () => {
-  $('exp').value = JSON.stringify({ format: 'pcmap-ar-proto/1', at: new Date().toISOString(), ua: navigator.userAgent, sim: SIM, scale: SCALE, grid: G, marks: S.marks, samples: S.samples, events: S.events, decodes: S.decodes, decodeTries: S.decodeTries, frame: S.frame, trace: S.trace });
+  $('exp').value = JSON.stringify({ format: 'pcmap-ar-proto/2', at: new Date().toISOString(), ua: navigator.userAgent, sim: SIM, scale: SCALE, grid: G, losses: S.losses, gen: S.gen, marks: S.marks, cals: S.cals, samples: S.samples, events: S.events, decodes: S.decodes, decodeTries: S.decodeTries, frame: S.frame, trace: S.trace });
   $('dlg').showModal();
 });
 $('btnClose').addEventListener('click', () => $('dlg').close());
 $('btnCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('exp').value); log('已複製'); } catch (e) { $('exp').select(); } });
 $('btnShare').addEventListener('click', async () => { const f = new File([$('exp').value], `ar-proto-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.json`, { type: 'application/json' }); if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f] }); } catch (e) {} } });
 
-renderSteps(); draw();
+buildGuide(); render(); draw();
 </script>
 </body>
 </html>
