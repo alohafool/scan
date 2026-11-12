@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PROTOTYPE 一格拍一張</title>
+<!--
+  PROTOTYPE，驗證完就刪，不是正式功能。
+  要回答的問題：站在格子前一步遠拍一張照片，能不能一次讀出整格的貼紙，並依照片裡的位置排出上下排與左右順序？
+  貼紙不在正面、照片讀不到的，用「補拍」靠近拍一張，加進同一格。
+  照片只在手機本機處理，不會上傳。資料只在記憶體，重新整理就沒了；測完按「匯出紀錄」。
+  桌機驗證：網址加 ?img=同源圖片網址，或加 ?debug 後從主控台餵圖。
+-->
+<style>
+:root { --bg:#161b22; --panel:#1f2630; --fg:#e6ebf0; --muted:#9aa7b4; --line:#3a4552; --accent:#f0804a; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --mono:Consolas,Menlo,monospace; color-scheme: dark }
+* { box-sizing: border-box } [hidden] { display: none !important }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif }
+body { padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); display: grid; gap: 8px }
+.tag { background: var(--bad); color: #000; font-weight: 700; padding: 1px 6px; border-radius: 4px; font-size: .75rem }
+h1 { font-size: 1rem; margin: 6px 0 0; display: flex; gap: 8px; align-items: center }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 8px }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center }
+button { font: inherit; font-weight: 600; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--line); background: #2a323c; color: var(--fg); min-height: 44px }
+button.primary { background: var(--accent); border-color: var(--accent); color: #000 } button:disabled { opacity: .4 }
+button.big { font-size: 1.15rem; padding: 14px 18px; flex: 1 }
+.muted { color: var(--muted); font-size: .85rem } .mono { font-family: var(--mono) }
+.cell { font-size: 1.3rem; font-weight: 800 }
+.status { border-radius: 10px; padding: 10px; font-weight: 800; font-size: 1.1rem; text-align: center; background: #2a323c }
+.status.ok { background: var(--ok); color: #000 } .status.warn { background: var(--warn); color: #000 } .status.err { background: var(--bad); color: #000 } .status.work { color: var(--warn) }
+#view { width: 100%; border-radius: 8px; background: #0d1117; display: block }
+ol.tags { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px }
+ol.tags li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 1.05rem }
+ol.tags li b { font-family: var(--mono) } ol.tags li .n { background: var(--ok); color: #000; font-weight: 800; border-radius: 999px; min-width: 26px; text-align: center; padding: 0 6px }
+.badge { font-size: .75rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted) } .badge.w { border-color: var(--warn); color: var(--warn) }
+ul.log { list-style: none; margin: 0; padding: 0; font-size: .9rem; max-height: 220px; overflow: auto } ul.log li { padding: 4px 0; border-bottom: 1px dashed var(--line) }
+textarea { width: 100%; min-height: 150px; font: 11px var(--mono); background: #0d1117; color: var(--fg); border: 1px solid var(--line); border-radius: 8px }
+dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; width: min(94vw, 520px) } dialog::backdrop { background: rgba(0,0,0,.6) }
+</style>
+</head>
+<body>
+<h1><span class="tag">PROTOTYPE</span> 一格拍一張 <span class="muted">v1</span></h1>
+
+<div class="panel">
+  <div class="cell" id="cellTitle">第 1 格</div>
+  <div class="muted">站在這一格前面一步遠，對著一層電腦拍一張，讓這一格的寬度大約塞滿畫面。貼紙不在正面、沒讀到的，按「補拍」靠近再拍一張，會加進同一格。照片只在手機上處理，不會上傳。</div>
+  <div class="row"><button class="primary big" id="btnShoot">拍這一格</button><button class="big" id="btnExtra">補拍</button></div>
+  <div class="row"><button id="btnPick">從相簿選照片</button></div>
+  <input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
+  <input type="file" id="filePick" accept="image/*" hidden>
+  <div class="status" id="status" hidden></div>
+</div>
+
+<div class="panel" id="pResult" hidden>
+  <canvas id="view"></canvas>
+  <div class="muted" id="photoInfo"></div>
+  <b id="resTitle"></b>
+  <ol class="tags" id="tagList"></ol>
+  <div class="row"><button id="btnDeep">少讀到？放大再找一次</button></div>
+  <div class="row"><button class="primary" id="btnNext">這格完成，下一格 ▸</button><button id="btnRedo">這格重拍</button></div>
+</div>
+
+<div class="panel"><b id="doneTitle">已完成的格子</b><ul class="log" id="done"></ul>
+  <div class="row"><button id="btnExport">匯出紀錄</button></div></div>
+
+<dialog id="dlg"><b>匯出紀錄</b><p class="muted">複製或分享這段 JSON 給 Claude 分析。</p><textarea id="exp" readonly></textarea>
+  <div class="row" style="margin-top:8px"><button class="primary" id="btnCopy">複製</button><button id="btnShare">分享／存檔</button><button id="btnClose">關閉</button></div></dialog>
+
+<script type="module">
+import { prepareZXingModule, readBarcodes } from './vendor/zxing-reader.js';
+
+const $ = id => document.getElementById(id);
+const Q = new URLSearchParams(location.search);
+prepareZXingModule({ overrides: { locateFile: (p, prefix) => p.endsWith('.wasm') ? new URL('./vendor/zxing_reader.wasm', location.href).href : prefix + p }, fireImmediately: true });
+const OPTS = { formats: ['DataMatrix'], tryHarder: true, tryRotate: true, tryDownscale: false, maxNumberOfSymbols: 30 };
+const MAX_AREA = 26e6;   // 超過就先縮，免得手機記憶體不夠
+
+// ---------------------------------------------------------------- 狀態（全部在記憶體）
+const T0 = Date.now(), now = () => Math.round((Date.now() - T0) / 100) / 10;
+const newCell = n => ({ n, photos: [], tags: [] });   // tags: { tag, src: wide|extra, photo, cx, cy, px, pass, row, order, alsoIn }
+const S = { cells: [], cur: newCell(1), busy: false, last: null, events: [] };
+
+// ---------------------------------------------------------------- 回饋
+let AC = null;
+const unlockAudio = () => { if (!AC) try { AC = new (window.AudioContext || window.webkitAudioContext)(); AC.resume?.(); } catch (e) {} };
+function beep(freq, ms, delay = 0) { if (!AC) return; try { const o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime + delay; o.frequency.value = freq; g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + ms / 1000); o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + ms / 1000); } catch (e) {} }
+function setStatus(msg, cls = '') { const s = $('status'); s.hidden = !msg; s.textContent = msg; s.className = 'status ' + cls; }
+
+// ---------------------------------------------------------------- 讀照片
+async function loadBitmap(src) {
+  if (typeof ImageBitmap !== 'undefined' && src instanceof ImageBitmap) return src;
+  let bmp = await createImageBitmap(src);
+  if (bmp.width * bmp.height > MAX_AREA) { const k = Math.sqrt(MAX_AREA / (bmp.width * bmp.height)), w = Math.round(bmp.width * k); bmp.close?.(); bmp = await createImageBitmap(src, { resizeWidth: w, resizeQuality: 'high' }); }
+  return bmp;
+}
+// 手機的 canvas 有面積上限，整張 2400 萬像素畫不下去，所以分塊讀；塊和塊重疊，碼才不會被切到。
+// scale 2 是把每一塊放大兩倍再讀一次，救回比較小或比較糊的碼；scale 小於 1 是縮小後再讀，給靠近拍、碼很大的照片用。
+async function decodeTiles(bmp, scale, found, onProgress) {
+  const W = bmp.width, H = bmp.height, tile = Math.round(1400 / scale), step = Math.round(1000 / scale);
+  const xs = [], ys = [];
+  for (let x = 0; ; x += step) { xs.push(x); if (x + tile >= W) break; }
+  for (let y = 0; ; y += step) { ys.push(y); if (y + tile >= H) break; }
+  const c = document.createElement('canvas'), g = c.getContext('2d', { willReadFrequently: true });
+  let k = 0, other = 0;
+  for (const y of ys) for (const x of xs) {
+    const w = Math.min(tile, W - x), h = Math.min(tile, H - y);
+    c.width = Math.round(w * scale); c.height = Math.round(h * scale); g.imageSmoothingQuality = 'high';
+    g.drawImage(bmp, x, y, w, h, 0, 0, c.width, c.height);
+    let rs = []; try { rs = await readBarcodes(g.getImageData(0, 0, c.width, c.height), OPTS); } catch (e) {}
+    for (const r of rs) {
+      const m = r.text.toUpperCase().match(/[A-Z]{2}\d{6}/); if (!m) { other++; continue; } if (found.has(m[0])) continue;
+      const p = r.position;
+      found.set(m[0], { tag: m[0], cx: Math.round(x + (p.topLeft.x + p.bottomRight.x) / 2 / scale), cy: Math.round(y + (p.topLeft.y + p.bottomRight.y) / 2 / scale), px: Math.round(Math.hypot(p.topRight.x - p.topLeft.x, p.topRight.y - p.topLeft.y) / scale), pass: scale });
+    }
+    onProgress(++k, xs.length * ys.length);
+    await tick();   // 讓畫面有機會更新
+  }
+  return other;
+}
+// 用 MessageChannel 讓出執行緒；setTimeout 在分頁被蓋住時會被瀏覽器拖慢到一秒一次
+const tick = () => new Promise(r => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
+const median = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+// 排列：第一張「拍這一格」的照片決定順序，高度差明顯才分上下排，每排由左到右；補拍的接在後面
+function arrange(cell) {
+  const first = cell.photos.findIndex(p => p.kind === 'wide');
+  const main = cell.tags.filter(t => t.photo === first), rest = cell.tags.filter(t => t.photo !== first);
+  const med = median(main.map(t => t.px)) || 1, byY = [...main].sort((a, b) => a.cy - b.cy);
+  let row = 0; byY.forEach((t, i) => { if (i && t.cy - byY[i - 1].cy > 10 * med) row++; t.row = row; });
+  main.sort((a, b) => a.row - b.row || a.cx - b.cx);
+  rest.sort((a, b) => a.photo - b.photo || a.cx - b.cx); rest.forEach(t => { t.row = null; });
+  cell.rows = row + (main.length ? 1 : 0);
+  cell.tags = [...main, ...rest]; cell.tags.forEach((t, i) => { t.order = i + 1; });
+}
+function merge(cell, photo, found) {
+  let added = 0;
+  for (const f of found) {
+    if (cell.tags.some(t => t.tag === f.tag)) continue;
+    const other = S.cells.find(c => c.tags.some(t => t.tag === f.tag));
+    cell.tags.push({ ...f, src: photo.kind, photo: photo.i, alsoIn: other ? other.n : null }); added++;
+  }
+  arrange(cell); return added;
+}
+async function handle(src, kind) {
+  if (S.busy || !src) return; S.busy = true; setButtons();
+  const t0 = performance.now(); setStatus('讀取照片…', 'work');
+  let bmp; try { bmp = await loadBitmap(src); } catch (e) { setStatus('這張照片讀不進來，請重拍', 'err'); S.busy = false; setButtons(); return; }
+  const found = new Map(), photo = { i: S.cur.photos.length, kind, t: now(), w: bmp.width, h: bmp.height };
+  S.cur.photos.push(photo); S.last = { bmp, photo, found };
+  // 先縮小讀一次：靠近拍的照片碼很大，原尺寸反而讀不到；再用原尺寸讀遠處的小碼
+  await decodeTiles(bmp, 0.35, found, (k, n) => setStatus(`找貼紙中（大的）${k}/${n}　已讀到 ${found.size} 張`, 'work'));
+  const other1 = await decodeTiles(bmp, 1, found, (k, n) => setStatus(`找貼紙中 ${k}/${n}　已讀到 ${found.size} 張`, 'work'));
+  photo.pass1 = found.size; photo.pass2 = null; photo.other = other1; photo.ms = Math.round(performance.now() - t0);
+  finish(photo, found, merge(S.cur, photo, [...found.values()]));
+}
+// 放大兩倍再找一次比較慢，所以只在覺得少讀到時才按
+async function deep() {
+  const L = S.last; if (S.busy || !L || L.photo.pass2 != null) return; S.busy = true; setButtons();
+  const t0 = performance.now(), before = L.found.size;
+  await decodeTiles(L.bmp, 2, L.found, (k, n) => setStatus(`放大再找一次 ${k}/${n}　已讀到 ${L.found.size} 張`, 'work'));
+  L.photo.pass2 = L.found.size - before; L.photo.ms += Math.round(performance.now() - t0);
+  finish(L.photo, L.found, merge(S.cur, L.photo, [...L.found.values()]), true);
+}
+function finish(photo, found, added, wasDeep) {
+  photo.codes = [...found.values()].map(f => ({ tag: f.tag, cx: f.cx, cy: f.cy, px: f.px, pass: f.pass })); photo.added = (photo.added || 0) + added;
+  S.busy = false; render(); setButtons();
+  if (wasDeep) { if (added) { setStatus(`✓ 放大後多讀到 ${added} 張，這一格現在有 ${S.cur.tags.length} 台`, 'ok'); beep(1175, 90); beep(1568, 160, 0.1); } else { setStatus('放大後沒有多讀到。沒讀到的請按「補拍」靠近拍', 'warn'); beep(440, 160); } return; }
+  if (!found.size) { setStatus(photo.kind === 'wide' ? '這張沒有讀到貼紙。靠近一點再拍，或確認貼紙有對到鏡頭' : '補拍這張沒有讀到貼紙，再靠近一點', 'warn'); beep(300, 250); }
+  else if (!added) { setStatus(`這張讀到 ${found.size} 張，都已經在這一格裡了`, 'warn'); beep(440, 160); }
+  else { setStatus(`✓ 這張讀到 ${found.size} 張貼紙，這一格現在有 ${S.cur.tags.length} 台`, 'ok'); beep(1175, 90); beep(1568, 160, 0.1); }
+}
+
+// ---------------------------------------------------------------- 畫面
+function setButtons() { for (const id of ['btnShoot', 'btnExtra', 'btnPick', 'btnNext', 'btnRedo', 'btnDeep']) $(id).disabled = S.busy; $('btnDeep').hidden = !S.last || S.last.photo.pass2 != null; }
+function drawView() {
+  const L = S.last; if (!L) return;
+  const cv = $('view'), W = L.bmp.width, H = L.bmp.height, k = Math.min(1, 1000 / W); cv.width = Math.round(W * k); cv.height = Math.round(H * k);
+  const c = cv.getContext('2d'); c.drawImage(L.bmp, 0, 0, cv.width, cv.height);
+  c.lineWidth = 4; c.font = 'bold 30px sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'center';
+  for (const f of L.found.values()) {
+    const t = S.cur.tags.find(x => x.tag === f.tag), r = Math.max(22, f.px * k * 1.4), x = f.cx * k, y = f.cy * k;
+    c.strokeStyle = '#4ade80'; c.strokeRect(x - r, y - r, r * 2, r * 2);
+    c.fillStyle = '#4ade80'; c.beginPath(); c.arc(x - r, y - r, 20, 0, 7); c.fill(); c.fillStyle = '#000'; c.fillText(t ? t.order : '?', x - r, y - r);
+  }
+}
+function render() {
+  const cur = S.cur, L = S.last;
+  $('cellTitle').textContent = `第 ${cur.n} 格`;
+  $('pResult').hidden = !cur.photos.length;
+  if (cur.photos.length) {
+    drawView();
+    const px = L ? [...L.found.values()].map(f => f.px) : [];
+    $('photoInfo').textContent = L ? `這張照片 ${L.photo.w}×${L.photo.h}${px.length ? `　碼寬 ${Math.min(...px)} 到 ${Math.max(...px)} 像素` : ''}${L.photo.ms ? `　花了 ${(L.photo.ms / 1000).toFixed(1)} 秒` : ''}` : '';
+    $('resTitle').textContent = `這一格目前讀到 ${cur.tags.length} 台${cur.rows > 1 ? `，分成 ${cur.rows} 排` : ''}`;
+    $('tagList').innerHTML = '';
+    for (const t of cur.tags) {
+      const li = document.createElement('li'), n = document.createElement('span'), b = document.createElement('b'); n.className = 'n'; n.textContent = t.order; b.textContent = t.tag; li.append(n, b);
+      const badge = (txt, cls = '') => { const s = document.createElement('span'); s.className = 'badge ' + cls; s.textContent = txt; li.appendChild(s); };
+      if (t.src === 'extra') badge('補拍'); else if (cur.rows > 1) badge(t.row === 0 ? '上排' : cur.rows === 2 ? '下排' : `第 ${t.row + 1} 排`);
+      if (t.alsoIn) badge(`第 ${t.alsoIn} 格也有`, 'w');
+      $('tagList').appendChild(li);
+    }
+  }
+  const total = S.cells.reduce((a, c) => a + c.tags.length, 0);
+  $('doneTitle').textContent = `已完成 ${S.cells.length} 格，共 ${total} 台`;
+  $('done').innerHTML = '';
+  [...S.cells].reverse().forEach(c => { const li = document.createElement('li'); li.textContent = `第 ${c.n} 格：${c.tags.length ? c.tags.length + ' 台　' + c.tags.map(t => t.tag).join('、') : '空的'}`; $('done').appendChild(li); });
+  setButtons();
+}
+
+// ---------------------------------------------------------------- 操作
+let nextKind = 'wide';
+$('btnShoot').addEventListener('click', () => { unlockAudio(); nextKind = 'wide'; $('fileCam').click(); });
+$('btnExtra').addEventListener('click', () => { unlockAudio(); nextKind = 'extra'; $('fileCam').click(); });
+$('btnPick').addEventListener('click', () => { unlockAudio(); nextKind = S.cur.photos.some(p => p.kind === 'wide') ? 'extra' : 'wide'; $('filePick').click(); });
+for (const id of ['fileCam', 'filePick']) $(id).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; handle(f, nextKind); });
+$('btnDeep').addEventListener('click', deep);
+$('btnNext').addEventListener('click', () => { if (S.busy) return; S.events.push({ t: now(), ev: 'next', cell: S.cur.n, tags: S.cur.tags.length }); S.cells.push(S.cur); S.cur = newCell(S.cur.n + 1); S.last = null; setStatus(''); render(); scrollTo(0, 0); });
+$('btnRedo').addEventListener('click', () => { if (S.busy) return; S.events.push({ t: now(), ev: 'redo', cell: S.cur.n, tags: S.cur.tags.length, photos: S.cur.photos.length }); S.cur = newCell(S.cur.n); S.last = null; setStatus(''); render(); });
+$('btnExport').addEventListener('click', () => {
+  const strip = c => ({ n: c.n, rows: c.rows || 0, photos: c.photos, tags: c.tags });
+  $('exp').value = JSON.stringify({ format: 'pcmap-photo-proto/1', at: new Date().toISOString(), ua: navigator.userAgent, cells: [...S.cells, ...(S.cur.photos.length ? [S.cur] : [])].map(strip), events: S.events });
+  $('dlg').showModal();
+});
+$('btnClose').addEventListener('click', () => $('dlg').close());
+$('btnCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('exp').value); setStatus('已複製', 'ok'); } catch (e) { $('exp').select(); } });
+$('btnShare').addEventListener('click', async () => { const f = new File([$('exp').value], `photo-proto-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.json`, { type: 'application/json' }); if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f] }); } catch (e) {} } });
+
+render(); setButtons();
+if (Q.has('debug')) window.__photo = { S, handle, deep, render };   // 桌機驗證用
+if (Q.get('img')) fetch(Q.get('img')).then(r => r.blob()).then(b => handle(b, 'wide'));
+</script>
+</body>
+</html>

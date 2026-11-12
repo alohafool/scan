@@ -1,5 +1,5 @@
 // 離線快取：頁面 + 解碼器。改版時把 VERSION 加一，舊快取會被清掉。
-const VERSION = 'pcmap-scan-v4';
+const VERSION = 'pcmap-scan-v5';
 const FILES = ['./', './index.html', './vendor/zxing-reader.js', './vendor/share.js', './vendor/zxing_reader.wasm', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
