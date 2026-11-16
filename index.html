@@ -44,6 +44,20 @@ label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted) }
 /* 掃描頁 */
 .cursor { background: var(--accent-soft); border: 1.5px solid var(--accent); border-radius: 10px; padding: 8px 12px; display: grid; gap: 2px }
 .cursor .pos { font-weight: 700; font-size: 1.05rem } .cursor .slot { font-family: var(--mono); color: var(--accent); font-size: .9rem }
+.cursor.done { background: var(--ok-soft); border-color: var(--ok) } .cursor.done .slot { color: var(--ok); font-weight: 700 }
+.cursor.over { background: var(--warn-soft); border-color: var(--warn) } .cursor.over .slot { color: var(--warn) }
+/* 這格的位置：點了台數就有那麼多個框，掃到一台亮一個 */
+.slots { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px }
+.sitem { font: 600 .78rem var(--mono); padding: 5px 8px; border-radius: 6px; border: 1.5px dashed var(--muted); color: var(--muted); min-width: 40px; text-align: center; background: var(--panel) }
+.sitem.on { border: 1.5px solid var(--ok); background: var(--ok-soft); color: var(--ok) }
+.sitem.nx { border-color: var(--accent); color: var(--accent) }
+.sitem.flash { animation: pop .5s }
+@keyframes pop { 0% { transform: scale(1.3) } 100% { transform: scale(1) } }
+button.mini { min-height: 32px; padding: 2px 10px; font-size: .8rem }
+.cntq { font-size: .85rem; color: var(--muted); margin-top: 4px }
+.cntrow { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px }
+.cntrow button { padding: 0 }
+.cntrow button.sel { background: var(--accent); border-color: var(--accent); color: #fff }
 .cam { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 4 / 3; max-height: 46vh; display: grid; place-items: center }
 .cam video { width: 100%; height: 100%; object-fit: cover } .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none }
 .cam .msg { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff; padding: 6px 10px; border-radius: 8px; font-size: .85rem; text-align: center }
@@ -59,17 +73,16 @@ label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted) }
 .rack { border: 1px solid var(--line); border-radius: 8px; overflow: hidden }
 .rack .name { font-size: .75rem; font-weight: 700; padding: 3px 6px; background: var(--bg); border-bottom: 1px solid var(--line) }
 .shelf { display: grid; grid-template-columns: 18px repeat(var(--cols), minmax(0, 1fr)); border-top: 1px solid var(--line) } .shelf:first-of-type { border-top: 0 }
+.shelf.top { border-bottom: 2px solid var(--muted) }
 .shelf .sl { font-size: .6rem; color: var(--muted); writing-mode: vertical-rl; display: flex; align-items: center; justify-content: center; border-right: 1px solid var(--line) }
 .cell { min-height: 40px; padding: 3px; border-left: 1px solid var(--line); position: relative; display: grid; align-content: start; gap: 2px; font-size: .62rem; line-height: 1.2 }
 .cell:first-of-type { border-left: 0 }
 .cell.monitor { background: repeating-linear-gradient(135deg, var(--monitor) 0 5px, transparent 5px 10px) } .cell.monitor::after { content: "螢幕"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted) }
 .cell.cur { outline: 3px solid var(--accent); outline-offset: -3px; background: var(--accent-soft) }
-.cell .cnt { font-weight: 700; font-size: .8rem } .cell .cnt.z { color: var(--muted); font-weight: 400 } .cell .last { font-family: var(--mono); color: var(--ok); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cell .cnt { font-weight: 700; font-size: .8rem; margin-top: 7px } .cell .cnt.z { color: var(--muted); font-weight: 400 } .cell .last { font-family: var(--mono); color: var(--ok); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cell.done { background: var(--ok-soft) } .cell.short { background: var(--warn-soft) }
 .cell .ci { position: absolute; top: 1px; right: 3px; font-size: .55rem; color: var(--muted) }
 
-/* 這格清單 */
-.chips { display: flex; flex-wrap: wrap; gap: 6px } .chip { font: 600 .78rem var(--mono); padding: 4px 8px; border-radius: 6px; background: var(--ok-soft); color: var(--ok) }
-.chip.new { background: var(--warn-soft); color: var(--warn) }
 textarea { font: .75rem var(--mono); width: 100%; min-height: 160px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); padding: 8px }
 .log { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: .8rem; max-height: 160px; overflow: auto } .log li { padding: 4px 8px; background: var(--bg); border-radius: 6px }
 dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); width: min(94vw, 520px); padding: 14px }
@@ -105,6 +118,7 @@ dialog::backdrop { background: rgba(0,0,0,.5) }
       <label style="flex:1">每層幾列（左到右）<input id="fCols" type="number" min="1" max="12" value="4" inputmode="numeric"></label>
     </div>
     <div><div class="muted">哪幾層是螢幕（不能放主機）</div><div class="kinds" id="kinds"></div></div>
+    <label><span>櫃子頂板上面也放電腦？</span><select id="fTop"><option value="0">沒有</option><option value="1">有，加一排「頂層」</option></select></label>
     <div class="row"><button class="primary" id="btnSaveLab">儲存</button><button class="ghost" id="btnCancelSetup">取消</button></div>
   </div>
 </section>
@@ -112,7 +126,11 @@ dialog::backdrop { background: rgba(0,0,0,.5) }
 <!-- 掃描 -->
 <section class="screen" id="scan">
   <div class="row" style="justify-content:space-between"><h2 id="scanTitle"></h2><div class="row"><button class="ghost" id="btnExport">匯出</button><button class="ghost" id="btnHome">首頁</button></div></div>
-  <div class="cursor"><div class="pos" id="pos"></div><div class="slot" id="slot"></div></div>
+  <div class="cursor" id="curBox">
+    <div class="pos" id="pos"></div><div class="slot" id="slot"></div>
+    <div class="slots" id="slots"></div>
+    <div id="cntBox"><div class="cntq">這格有幾台？不點也可以直接掃</div><div class="cntrow" id="cntRow"></div></div>
+  </div>
   <div class="cam" id="cam">
     <div class="off" id="camOff">按「開相機」對準貼紙上的方形碼，讀到會自動放進目前這格。</div>
     <video id="video" playsinline muted hidden></video>
@@ -128,8 +146,7 @@ dialog::backdrop { background: rgba(0,0,0,.5) }
   <div class="manual"><input id="manual" placeholder="手打財編，例如 BD123456" autocapitalize="characters" autocorrect="off"><button id="btnManual">放入</button></div>
   <div class="row"><button id="btnNext">這格掃完，下一格 ▸</button><button id="btnUndo">復原</button></div>
   <div class="panel">
-    <div class="row" style="justify-content:space-between"><b id="cellTitle"></b><span class="muted">點格子可換位置；同一格左→右掃</span></div>
-    <div class="chips" id="chips"></div>
+    <div class="row" style="justify-content:space-between"><b id="cellTitle"></b><span class="muted">點格子可換位置。綠＝齊了，黃＝和點的台數不同</span></div>
     <div class="floor" id="floor"></div>
   </div>
   <div class="panel"><b>最近</b><ul class="log" id="log"></ul></div>
@@ -145,7 +162,7 @@ dialog::backdrop { background: rgba(0,0,0,.5) }
 <script type="module">
 import { prepareZXingModule, readBarcodes } from './vendor/zxing-reader.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.3.0';
 const KEY = 'pcmap-scan:v1';
 const TAG_RE = /[A-Z]{2}\d{6}/;
 const $ = id => document.getElementById(id);
@@ -160,20 +177,38 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').ca
 // ---------------------------------------------------------------- 格局工具（和 PC MAP 的 grid 同一套）
 const racksOf = g => g.sides?.length ? g.sides.reduce((a, s) => a + s.racks, 0) : g.racks;
 const kindOf = (g, s) => (g.shelf_kinds || [])[s] || 'pc';
+const canHold = (g, s) => kindOf(g, s) !== 'monitor';   // pc 層和頂層（櫃子頂板上）都能放主機
 const pcShelves = g => [...Array(g.shelves).keys()].filter(s => kindOf(g, s) === 'pc');
+const shelfNo = (g, s) => { let n = 0; for (let i = 0; i <= s; i++) if (kindOf(g, i) !== 'top') n++; return n; };   // 頂層不算進層號
+const shelfName = (g, s) => kindOf(g, s) === 'top' ? '頂層' : `第 ${shelfNo(g, s)} 層`;
+// 兩個格局之間的層號對應：頂層對頂層，其餘各層照由上到下的順序；對不到的不在表裡
+function shelfMap(a, b) {
+  const split = g => { const t = [], r = []; for (let s = 0; s < g.shelves; s++) (kindOf(g, s) === 'top' ? t : r).push(s); return [t, r]; };
+  const [at, ar] = split(a), [bt, br] = split(b), m = {};
+  at.forEach((s, i) => { if (bt[i] != null) m[s] = bt[i]; }); ar.forEach((s, i) => { if (br[i] != null) m[s] = br[i]; });
+  return m;
+}
 function rackLabel(g, r) {
   if (!g.sides?.length) return `櫃 ${r + 1}`;
   let off = 0; for (const s of g.sides) { if (r < off + s.racks) return `${s.label}櫃 ${r - off + 1}`; off += s.racks; }
   return `櫃 ${r + 1}`;
 }
-const posText = (g, p) => `${rackLabel(g, p.rack)} · 第 ${p.col + 1} 列 · 第 ${p.shelf + 1} 層`;
+const posText = (g, p) => `${rackLabel(g, p.rack)} · 第 ${p.col + 1} 列 · ${shelfName(g, p.shelf)}`;
 const key = p => `${p.rack}-${p.shelf}-${p.col}`;
 const parseKey = k => { const [rack, shelf, col] = k.split('-').map(Number); return { rack, shelf, col }; };
 const lab = () => S.labs[S.current];
 const cellTags = (L, k) => L.cells[k] || [];
+// 這格的人點的台數（L.expect[格子]）；沒點過是 undefined，點 0 代表這格是空的
+const expOf = (L, k) => L.expect?.[k];
+// none 沒點台數、short 還缺、done 齊了（含空格）、over 掃到的比點的多
+function cellState(L, k) { const e = expOf(L, k), n = cellTags(L, k).length; return e == null ? 'none' : n < e ? 'short' : n > e ? 'over' : 'done'; }
+const byPos = (a, b) => { const p = parseKey(a), q = parseKey(b); return p.rack - q.rack || p.col - q.col || p.shelf - q.shelf; };
+const shortCells = L => Object.keys(L.expect || {}).filter(k => cellState(L, k) === 'short').sort(byPos);
+const outside = (g, p) => p.rack >= g.racks || p.shelf >= g.shelves || p.col >= g.per_shelf || !canHold(g, p.shelf);
 function whereIs(L, tag) { for (const k in L.cells) if (L.cells[k].includes(tag)) return k; return null; }
 function nextCell(g, p) {
-  const sh = pcShelves(g), i = sh.indexOf(p.shelf);
+  // 櫃內：同一列由上到下，再換下一列。頂層自己走一趟：沿著櫃頂一列一列過去
+  const sh = kindOf(g, p.shelf) === 'top' ? [p.shelf] : pcShelves(g), i = sh.indexOf(p.shelf);
   if (i >= 0 && i < sh.length - 1) return { ...p, shelf: sh[i + 1] };
   if (p.col < g.per_shelf - 1) return { rack: p.rack, shelf: sh[0], col: p.col + 1 };
   if (p.rack < racksOf(g) - 1) return { rack: p.rack + 1, shelf: sh[0], col: 0 };
@@ -185,10 +220,11 @@ let toastTimer;
 function toast(msg, cls = '') { const t = $('toast'); t.textContent = msg; t.className = 'toast on ' + cls; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', 1800); }
 function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); if (id !== 'scan') stopCam(); }
 let audio;
-function beep(ok = true) {
-  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = ok ? 1100 : 300; o.connect(g); g.connect(audio.destination); g.gain.value = .15; o.start(); o.stop(audio.currentTime + (ok ? .08 : .25)); } catch (e) {}
-  try { navigator.vibrate?.(ok ? 60 : [80, 60, 80]); } catch (e) {}
+function beep(ok = true) {   // true 掃到、false 失敗、'done' 這格齊了（兩聲）
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const tone = (f, t0, d) => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = f; o.connect(g); g.connect(audio.destination); g.gain.value = .15; o.start(audio.currentTime + t0); o.stop(audio.currentTime + t0 + d); };
+    if (ok === 'done') { tone(1100, 0, .08); tone(1650, .12, .18); } else tone(ok ? 1100 : 300, 0, ok ? .08 : .25); } catch (e) {}
+  try { navigator.vibrate?.(ok === 'done' ? [60, 60, 160] : ok ? 60 : [80, 60, 80]); } catch (e) {}
 }
 
 // ---------------------------------------------------------------- 首頁
@@ -202,7 +238,8 @@ function renderHome() {
     const el = document.createElement('div'); el.className = 'labcard';
     el.innerHTML = `<div><div class="n"></div><div class="s"></div></div><div class="row"><button class="primary" data-a="scan">掃描</button><button data-a="edit">格局</button><button class="ghost danger" data-a="del">刪除</button></div>`;
     el.querySelector('.n').textContent = `${L.label || slug}（${slug}）`;
-    el.querySelector('.s').textContent = `${racksOf(L.grid)} 櫃 × ${L.grid.shelves} 層 × ${L.grid.per_shelf} 列 · 已掃 ${n} 台`;
+    const sc = shortCells(L).length;
+    el.querySelector('.s').textContent = `${racksOf(L.grid)} 櫃 × ${L.grid.shelves} 層 × ${L.grid.per_shelf} 列 · 已掃 ${n} 台` + (sc ? ` · ${sc} 格還缺` : '');
     el.addEventListener('click', e => {
       const a = e.target.dataset.a; if (!a) return;
       if (a === 'scan') { S.current = slug; save(); openScan(); }
@@ -215,7 +252,7 @@ function renderHome() {
 }
 let confirmDel = null;
 $('btnNewLab').addEventListener('click', () => openSetup(null));
-$('btnPresetZhunan').addEventListener('click', () => openSetup(null, { slug: 'zhunan', label: '竹南', grid: { racks: 4, shelves: 3, per_shelf: 4, sides: [{ label: '左側', racks: 2 }, { label: '右側', racks: 2 }], shelf_kinds: ['monitor', 'pc', 'pc'], zones: [{ label: 'UFS', rack: 1, cols: [0, 1] }] } }));
+$('btnPresetZhunan').addEventListener('click', () => openSetup(null, { slug: 'zhunan', label: '竹南', grid: { racks: 4, shelves: 4, per_shelf: 4, sides: [{ label: '左側', racks: 2 }, { label: '右側', racks: 2 }], shelf_kinds: ['top', 'monitor', 'pc', 'pc'], zones: [{ label: 'UFS', rack: 1, cols: [0, 1] }] } }));
 
 // ---------------------------------------------------------------- 格局設定
 let editing = null, presetZones = null;
@@ -227,9 +264,11 @@ function openSetup(slug, preset) {
   $('fSlug').value = L ? slug : (preset?.slug || ''); $('fSlug').disabled = !!L;
   $('fLabel').value = L ? (L.label || '') : (preset?.label || '');
   $('fSided').value = g.sides?.length ? '1' : '0';
-  $('fRacks').value = g.racks || 1; $('fShelves').value = g.shelves; $('fCols').value = g.per_shelf;
+  const inner = [...Array(g.shelves).keys()].filter(s => kindOf(g, s) !== 'top').map(s => kindOf(g, s));
+  $('fRacks').value = g.racks || 1; $('fShelves').value = inner.length; $('fCols').value = g.per_shelf;
+  $('fTop').value = inner.length < g.shelves ? '1' : '0';
   renderSides(g.sides?.length ? g.sides : [{ label: '左側', racks: 1 }, { label: '右側', racks: 1 }]);
-  renderKinds(g.shelves, g.shelf_kinds || []);
+  renderKinds(inner.length, inner);
   toggleSided();
   show('setup');
 }
@@ -257,34 +296,74 @@ $('btnSaveLab').addEventListener('click', () => {
   const slug = $('fSlug').value.trim().toLowerCase();
   if (!/^[a-z][a-z0-9_-]{0,31}$/.test(slug)) return toast('代號要是小寫英數，例如 zhunan', 'err');
   if (!editing && S.labs[slug]) return toast('這個代號已經有了', 'err');
-  const shelves = Math.max(1, +$('fShelves').value || 1), per_shelf = Math.max(1, +$('fCols').value || 1);
-  const kinds = [...$('kinds').querySelectorAll('input')].map(i => i.checked ? 'monitor' : 'pc');
-  if (!kinds.includes('pc')) return toast('至少要有一層能放主機', 'err');
-  const g = { shelves, per_shelf, shelf_kinds: kinds };
+  const nInner = Math.max(1, +$('fShelves').value || 1), per_shelf = Math.max(1, +$('fCols').value || 1);
+  const boxes = [...$('kinds').querySelectorAll('input')];
+  const innerKinds = Array.from({ length: nInner }, (_, i) => boxes[i]?.checked ? 'monitor' : 'pc');
+  if (!innerKinds.includes('pc')) return toast('至少要有一層能放主機', 'err');
+  const kinds = $('fTop').value === '1' ? ['top', ...innerKinds] : innerKinds;
+  const g = { shelves: kinds.length, per_shelf, shelf_kinds: kinds };
   if ($('fSided').value === '1') { g.sides = readSides(); g.racks = racksOf(g); } else g.racks = Math.max(1, +$('fRacks').value || 1);
   if (presetZones) g.zones = presetZones;
   const L = S.labs[slug] || { slug, cells: {}, log: [], cursor: null };
+  // 層有增減（例如加了頂層）：已掃的格子跟著搬到新的層號，對不到的移回「未定位」
+  if (L.grid) {
+    const map = shelfMap(L.grid, g), cells = {};
+    for (const k of Object.keys(L.cells)) { const p = parseKey(k), ns = map[p.shelf]; if (ns == null) L.unplaced = (L.unplaced || []).concat(L.cells[k]); else cells[key({ ...p, shelf: ns })] = L.cells[k]; }
+    const exp = {};
+    for (const k of Object.keys(L.expect || {})) { const p = parseKey(k), ns = map[p.shelf]; if (ns != null) exp[key({ ...p, shelf: ns })] = L.expect[k]; }
+    L.cells = cells; L.expect = exp; L.undo = [];
+    if (L.cursor) L.cursor = map[L.cursor.shelf] == null ? null : { ...L.cursor, shelf: map[L.cursor.shelf] };
+  }
   L.label = $('fLabel').value.trim() || slug; L.grid = g;
   // 格局縮小時，掉到格子外的掃描結果移回「未定位」（保留財編，不丟）
-  for (const k of Object.keys(L.cells)) { const p = parseKey(k); if (p.rack >= g.racks || p.shelf >= g.shelves || p.col >= g.per_shelf || kindOf(g, p.shelf) !== 'pc') { L.unplaced = (L.unplaced || []).concat(L.cells[k]); delete L.cells[k]; } }
+  for (const k of Object.keys(L.cells)) if (outside(g, parseKey(k))) { L.unplaced = (L.unplaced || []).concat(L.cells[k]); delete L.cells[k]; }
+  for (const k of Object.keys(L.expect || {})) if (outside(g, parseKey(k))) delete L.expect[k];
   S.labs[slug] = L; S.current = slug; save(); openScan();
 });
 
 // ---------------------------------------------------------------- 掃描頁
 function openScan() {
   const L = lab(); if (!L) return show('home');
-  if (!L.cursor) L.cursor = { rack: 0, shelf: pcShelves(L.grid)[0], col: 0 };
+  const g = L.grid, c = L.cursor;
+  if (!c || c.rack >= racksOf(g) || c.shelf >= g.shelves || c.col >= g.per_shelf || !canHold(g, c.shelf)) L.cursor = { rack: 0, shelf: pcShelves(g)[0], col: 0 };
   $('scanTitle').textContent = L.label;
-  renderScan(); show('scan'); $('manual').value = '';
+  pickFor = null; renderScan(); show('scan'); $('manual').value = '';
 }
 function renderScan(flash) {
   const L = lab(), g = L.grid, cur = L.cursor, k = key(cur);
+  const tags = cellTags(L, k), n = tags.length, e = expOf(L, k), st = cellState(L, k);
   $('pos').textContent = posText(g, cur);
-  $('slot').textContent = `下一台 = 第 ${cellTags(L, k).length + 1} 台`;
-  $('cellTitle').textContent = `這格 ${cellTags(L, k).length} 台`;
-  const chips = $('chips'); chips.innerHTML = '';
-  cellTags(L, k).forEach((t, i) => { const c = document.createElement('span'); c.className = 'chip'; c.textContent = `${i + 1}. ${t}`; chips.appendChild(c); });
-  if (!cellTags(L, k).length) chips.innerHTML = '<span class="muted">還沒掃</span>';
+  $('curBox').className = 'cursor' + (st === 'done' ? ' done' : st === 'over' ? ' over' : '');
+  $('slot').textContent = st === 'none' ? (n ? `已掃 ${n} 台，下一台 = 第 ${n + 1} 台` : '由左到右掃，疊起來的先上後下')
+    : st === 'short' ? `已掃 ${n} / ${e}，還缺 ${e - n} 台`
+    : st === 'over' ? `已掃 ${n} 台，比你點的 ${e} 台多 ${n - e} 台`
+    : e ? `${n} / ${e} 齊了 ✓ 按「下一格」` : '這格是空的 ✓ 按「下一格」';
+  // 這格的位置：掃到的亮起來並顯示財編，還沒掃的是虛線框，下一個要掃的框是橘色
+  const slots = $('slots'); slots.innerHTML = '';
+  for (let i = 0; i < Math.max(n, e || 0); i++) {
+    const el = document.createElement('span');
+    el.className = 'sitem' + (i < n ? ' on' : i === n ? ' nx' : '') + (flash && tags[i] === flash ? ' flash' : '');
+    el.textContent = i < n ? `${i + 1}. ${tags[i]}` : `${i + 1}`;
+    slots.appendChild(el);
+  }
+  if (e != null) { const b = document.createElement('button'); b.className = 'ghost mini'; b.textContent = '改台數'; b.addEventListener('click', () => { pickFor = pickFor === k ? null : k; renderScan(); }); slots.appendChild(b); }
+  slots.hidden = !slots.children.length;
+  // 台數按鈕：還沒點過才顯示，點過就收起來，按「改台數」再打開
+  const picking = e == null || pickFor === k;
+  $('cntBox').hidden = !picking;
+  if (picking) {
+    const row = $('cntRow'); row.innerHTML = '';
+    for (const v of [0, 1, 2, 3, 4, 5, 6, '＋']) {
+      const b = document.createElement('button'), more = v === '＋';
+      b.textContent = more && e > 6 ? `${e}＋` : v;
+      if (v === e || (more && e > 6)) b.className = 'sel';
+      b.addEventListener('click', () => setExpect(more ? Math.max(6, e || 0, n) + 1 : v));
+      row.appendChild(b);
+    }
+  }
+  $('btnNext').classList.toggle('primary', st === 'done');
+  const total = Object.values(L.cells).reduce((a, t) => a + t.length, 0), sc = shortCells(L).length;
+  $('cellTitle').textContent = `已掃 ${total} 台` + (sc ? ` · ${sc} 格還缺` : '');
   // 格子圖
   const floor = $('floor'); floor.innerHTML = ''; floor.style.setProperty('--cols', g.per_shelf);
   const sides = g.sides?.length ? g.sides : [{ label: '', racks: g.racks }];
@@ -297,14 +376,16 @@ function renderScan(flash) {
       const rack = document.createElement('div'); rack.className = 'rack';
       rack.innerHTML = `<div class="name">${rackLabel(g, r)}</div>`;
       for (let sh = 0; sh < g.shelves; sh++) {
-        const shelf = document.createElement('div'); shelf.className = 'shelf';
-        shelf.innerHTML = `<div class="sl">${sh + 1}層</div>`;
+        const shelf = document.createElement('div'); shelf.className = 'shelf' + (kindOf(g, sh) === 'top' ? ' top' : '');
+        shelf.innerHTML = `<div class="sl">${kindOf(g, sh) === 'top' ? '頂' : shelfNo(g, sh) + '層'}</div>`;
         for (let c = 0; c < g.per_shelf; c++) {
           const p = { rack: r, shelf: sh, col: c }, kk = key(p), cell = document.createElement('div');
-          cell.className = 'cell' + (kindOf(g, sh) !== 'pc' ? ' monitor' : '') + (kk === k ? ' cur' : '');
-          if (kindOf(g, sh) === 'pc') {
-            const tags = cellTags(L, kk);
-            cell.innerHTML = `<span class="ci">${c + 1}列</span><span class="cnt ${tags.length ? '' : 'z'}">${tags.length ? tags.length + ' 台' : '－'}</span>` + (tags.length ? `<span class="last">${tags[tags.length - 1]}</span>` : '');
+          cell.className = 'cell' + (canHold(g, sh) ? '' : ' monitor') + (kk === k ? ' cur' : '');
+          if (canHold(g, sh)) {
+            const tags = cellTags(L, kk), ex = expOf(L, kk), cs = cellState(L, kk);
+            if (cs !== 'none') cell.className += cs === 'done' ? ' done' : ' short';
+            const cnt = ex == null ? (tags.length ? tags.length + ' 台' : '－') : !ex && !tags.length ? '空' : `${tags.length}/${ex}`;
+            cell.innerHTML = `<span class="ci">${c + 1}列</span><span class="cnt ${tags.length || ex != null ? '' : 'z'}">${cnt}</span>` + (tags.length ? `<span class="last">${tags[tags.length - 1]}</span>` : '');
             cell.addEventListener('click', () => { L.cursor = p; save(); renderScan(); });
           }
           shelf.appendChild(cell);
@@ -323,6 +404,19 @@ function renderScan(flash) {
 }
 function logMsg(L, msg) { L.log.push({ at: new Date().toISOString(), msg }); if (L.log.length > 200) L.log.splice(0, L.log.length - 200); }
 
+let pickFor = null;    // 正在改台數的格子（按了「改台數」）
+let leaveAsk = null;   // 還缺就按「下一格」：第一次只提醒，同一格再按一次才走
+// 人點這格有幾台。點 0 代表空格，沒東西可掃，直接到下一格
+function setExpect(v) {
+  const L = lab(), g = L.grid, k = key(L.cursor), n = cellTags(L, k).length;
+  if (v < n) { beep(false); return toast(`這格已經掃了 ${n} 台，台數不能比它少`, 'warn'); }
+  (L.expect = L.expect || {})[k] = v; pickFor = null; leaveAsk = null;
+  logMsg(L, `${posText(g, L.cursor)}：${v ? `點了 ${v} 台` : '空的'}`);
+  const nx = v ? null : nextCell(g, L.cursor);
+  if (nx) { toast('這格記成空的，到下一格', 'ok'); L.cursor = nx; }
+  else if (v && v === n) { beep('done'); toast(`這格 ${n} / ${v} 齊了`, 'ok'); }
+  save(); renderScan();
+}
 const recent = new Map(); // tag -> 上次放入時間，相機連續畫面去抖動
 function place(tagRaw, source) {
   const L = lab(), g = L.grid, k = key(L.cursor);
@@ -339,13 +433,22 @@ function place(tagRaw, source) {
   L.cells[k] = cellTags(L, k).concat(tag);
   L.raw = L.raw || {}; L.raw[tag] = { raw: String(tagRaw), at: new Date().toISOString(), source };
   logMsg(L, from ? `${tag} 從 ${posText(g, parseKey(from))} 搬到這格，第 ${L.cells[k].length} 台` : `${tag} 放到第 ${L.cells[k].length} 台`);
-  save(); renderScan(tag); beep(true);
-  toast(from ? `搬動 ${tag}` : `${tag} ✓ 第 ${L.cells[k].length} 台`, 'ok');
+  leaveAsk = null; save(); renderScan(tag);
+  // 有點過台數的格子：掃齊了用兩聲和綠色提示，掃超過用黃色提醒
+  const n = L.cells[k].length, e = expOf(L, k), head = from ? `搬動 ${tag}` : `${tag} ✓`;
+  if (e != null && n === e) { beep('done'); toast(`${head} 這格 ${n} / ${e} 齊了`, 'ok'); }
+  else if (e != null && n > e) { beep(true); toast(`${head} 第 ${n} 台，比你點的 ${e} 台多`, 'warn'); }
+  else { beep(true); toast(e != null ? `${head} 第 ${n} / ${e} 台` : from ? head : `${head} 第 ${n} 台`, 'ok'); }
   return true;
 }
 $('btnManual').addEventListener('click', () => { if (place($('manual').value, 'manual')) $('manual').value = ''; });
 $('manual').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('btnManual').click(); } });
-$('btnNext').addEventListener('click', () => { const L = lab(), n = nextCell(L.grid, L.cursor); if (!n) return toast('已經是最後一格', 'warn'); L.cursor = n; save(); renderScan(); });
+$('btnNext').addEventListener('click', () => {
+  const L = lab(), g = L.grid, k = key(L.cursor), n = nextCell(g, L.cursor);
+  if (cellState(L, k) === 'short' && leaveAsk !== k) { leaveAsk = k; beep(false); return toast(`這格還缺 ${expOf(L, k) - cellTags(L, k).length} 台。真的要走就再按一次`, 'warn'); }
+  if (!n) return toast(kindOf(g, L.cursor.shelf) === 'top' ? '頂層最後一格了' : g.shelf_kinds?.includes('top') ? '櫃內最後一格了。頂層請點格子圖最上面「頂」那一排' : '已經是最後一格', 'warn');
+  leaveAsk = null; L.cursor = n; save(); renderScan();
+});
 $('btnUndo').addEventListener('click', () => {
   const L = lab(), a = L.undo?.pop(); if (!a) return;
   const arr = L.cells[a.to] || []; arr.splice(arr.indexOf(a.tag), 1); if (!arr.length) delete L.cells[a.to];
@@ -428,11 +531,15 @@ function exportJson() {
   const L = lab(), scans = [];
   for (const k of Object.keys(L.cells)) { const p = parseKey(k); L.cells[k].forEach((tag, slot) => scans.push({ tag, ...p, slot, at: L.raw?.[tag]?.at || null, raw: L.raw?.[tag]?.raw || tag, source: L.raw?.[tag]?.source || null })); }
   scans.sort((a, b) => a.rack - b.rack || a.col - b.col || a.shelf - b.shelf || a.slot - b.slot);
-  return { format: 'pcmap-scan/1', app: `pcmap-scan ${VERSION}`, exported_at: new Date().toISOString(), lab: L.slug, label: L.label, grid: L.grid, scans, unplaced: L.unplaced || [] };
+  // expected：人在現場點的每格台數（0 = 確認是空格）。匯入端目前不使用，只留紀錄
+  const expected = Object.keys(L.expect || {}).sort(byPos).map(k => ({ ...parseKey(k), count: L.expect[k] }));
+  return { format: 'pcmap-scan/1', app: `pcmap-scan ${VERSION}`, exported_at: new Date().toISOString(), lab: L.slug, label: L.label, grid: L.grid, scans, expected, unplaced: L.unplaced || [] };
 }
 $('btnExport').addEventListener('click', () => {
   const j = exportJson(); $('expText').value = JSON.stringify(j, null, 1);
-  $('expSummary').textContent = `${j.label}：${j.scans.length} 台，${Object.keys(lab().cells).length} 格。檔名建議 scan-${j.lab}-${j.exported_at.slice(0, 10)}.json`;
+  const L = lab(), sc = shortCells(L);
+  const miss = sc.length ? `還有 ${sc.length} 格沒掃齊：${sc.slice(0, 6).map(k => `${posText(L.grid, parseKey(k))} ${cellTags(L, k).length}/${expOf(L, k)}`).join('；')}${sc.length > 6 ? ' …' : ''}。` : '';
+  $('expSummary').textContent = `${j.label}：${j.scans.length} 台，${Object.keys(L.cells).length} 格。${miss}檔名建議 scan-${j.lab}-${j.exported_at.slice(0, 10)}.json`;
   $('dlgExport').showModal();
 });
 $('btnCloseExport').addEventListener('click', () => $('dlgExport').close());
